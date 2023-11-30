@@ -310,11 +310,8 @@ def main():
                         ------------------------")
 
 
-    # Count the number of available cpus to spin up instances on
-    cpus = os.cpu_count()
-
     # Generate a pool and run the operation
-    pool = mp.Pool(cpus)
+    pool = mp.Pool(CPU_COUNT)
 
     # Perform analysis
     file_out, bound_score, unbound_score, unbound_var, ddg_binding, ddg_binding_var, res_scores = zip(*pool.map(
