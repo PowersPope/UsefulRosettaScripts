@@ -23,6 +23,7 @@ import glob
 import multiprocessing as mp
 import argparse
 from functools import partial
+import datetime
 
 # Import data management
 import pandas as pd
@@ -225,7 +226,7 @@ def setup_and_apply(file, path, relax_req, max_cpus, per_residue, cycpep, nstruc
         # extract information
         res_scores = score_residues(pose, scorefxn)
     else:
-        res_score = None
+        res_scores = None
 
     # define repacking selectors and task object
     packer = select_repack(pose)
@@ -264,11 +265,17 @@ def setup_and_apply(file, path, relax_req, max_cpus, per_residue, cycpep, nstruc
         unbound_file_path = os.path.join(unbound_path, f"{file[:-4].split('/')[-1]}_unbound.pdb")
         if not os.path.exists(unbound_file_path):
 
+            # Get the working dir
+            working_dir = os.getcwd()
+
             # Change directories for this
             os.chdir(unbound_path)
 
             # dump the unbound
             test_pose.dump_pdb(f"{file[:-4].split('/')[-1]}_unbound.pdb")
+
+            # Go back to the working directory
+            os.chdir(working_dir)
 
     return file, bound, unbound.mean(), unbound.var(), binding_ddg.mean(), binding_ddg.var(), res_scores
 
@@ -340,7 +347,7 @@ def main():
     )
 
     # If res_scores is set and filled then write out info to separate df and concat them
-    if res_scores != None:
+    if PRE_RESIDUE:
         # init new dict
         total_dict = dict()
 
@@ -356,7 +363,7 @@ def main():
 
 
     # write dataframe to csv
-    ddg_bind_df.to_csv("ddg_top20_peptides.csv", index=False)
+    ddg_bind_df.to_csv(f"ddg_binding_{datetime.date.today()}.csv", index=False)
 
 # Run function
 if __name__ == "__main__":
