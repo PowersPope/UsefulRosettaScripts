@@ -153,7 +153,7 @@ def score_residues(pose, scorefxn):
 
     return res_scores
 
-def setup_and_apply(file, path, relax_req, max_cpus, per_residue, cycpep, nstruct):
+def setup_and_apply(file, path, relax_req, max_cpus, per_residue, cycpep, nstruct, scorefxn_input):
     """Perform ddg unbinding. Score complex, pull apart, repack, rescore
 
     PARAMS
@@ -172,6 +172,8 @@ def setup_and_apply(file, path, relax_req, max_cpus, per_residue, cycpep, nstruc
             Determines if chains are specified, since bug is present for pyrosetta for cycpeps
         nstruct: int
             Number of repack and move rescore attempts
+        scorefxn_input: str
+            Score function to use within rosetta.
 
     RETURNS
     -------
@@ -185,7 +187,7 @@ def setup_and_apply(file, path, relax_req, max_cpus, per_residue, cycpep, nstruc
             ddg between bound and unbound (bounnd - unbound)
     """
     # setup the scorefxn
-    scorefxn = create_score_function("ref2015_cart")
+    scorefxn = create_score_function(scorefxn_input)
 
     # setup partners
     partners = "A_B"
@@ -295,6 +297,8 @@ def main():
     p.add_argument("--cycpep", action="store_true", help="Specify if working with cyclic peptides")
     p.add_argument("--nstruct", type=int, help="Number of attempts to compute the binding ddG (default: 10)",
                    default=10)
+    p.add_argument("--score_function", type=str, help="Set PyRosetta score function, make sure \
+                   to check available score functions. (default: ref2015_cart)", default="ref2015_cart")
     args = p.parse_args()
 
     # init pyrosetta
@@ -307,6 +311,7 @@ def main():
     PER_RESIDUE = args.score_per_residue
     CYCPEP = args.cycpep
     NSTRUCT = args.nstruct
+    SCOREFXN = args.score_function
 
     # check path and list dir
     if os.path.exists(PDB_DIR):
@@ -330,6 +335,7 @@ def main():
             per_residue=PER_RESIDUE,
             cycpep=CYCPEP,
             nstruct=NSTRUCT,
+            scorefxn_input=SCOREFXN,
         ),
         pdbs
     ))
