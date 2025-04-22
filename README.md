@@ -33,3 +33,28 @@ optional arguments:
   --nstruct NSTRUCT     Number of attempts to compute the binding ddG (default: 10)
 ```
 
+- `insolution_genkic.py`: Example script on how to use genkic within PyRosetta. 
+As I needed to make myself a script for comparison to models, and I noticed there was no good GenKIC PyRosetta example script on GitHub or in the PyRosetta workshop notebooks.
+This uses `ref2015` weights by default:
+```
+usage: Generate Macrocycle Backbones [-h] [-s SIZE [SIZE ...]] [-n NSTRUCT] [--debug]
+                                     [--nofilter] [--sample-root] [--time-test]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -s SIZE [SIZE ...], --size SIZE [SIZE ...]
+                        List of number of residue macrocycles you'd like to generate
+                        (default: [6, 7, 8, 9])
+  -n NSTRUCT, --nstruct NSTRUCT
+                        Number of structures to generate per size. (default: 10000)
+  --debug               Dump PDBs for testing, unmute Rosetta, print helpful trace messages
+                        (default: False)
+  --nofilter            Dont apply strcit filter on hbonds (default: False)
+  --sample-root         If generating samples in-solution then this should be set as your
+                        root residue is generally not an anchor. (default: False)
+  --time-test           This is only for a time comparison between XML and PyRosetta as XML
+                        writes to disk for every structure, but here we do not. This can be
+                        done for time comparisons. Dont set as it will make the process
+                        slower. (default: False)
+```
+

@@ -10,7 +10,7 @@ from typing import List, Tuple
 import datetime
 
 # decorators
-from decorators import timeit
+from utils.decorators import timeit
 
 # Rosetta imports
 from pyrosetta import init
