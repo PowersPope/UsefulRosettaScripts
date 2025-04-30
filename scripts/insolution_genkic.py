@@ -465,7 +465,10 @@ class BackboneGeneration:
         opts.in_fullatom(True)
         opts.set_binary_output(True)
         silentFile = silent.SilentFileData(opts)
-        out_name = f"genkicbb_size{s}_{datetime.date.today().strftime('%m%d%Y')}.silent"
+        if self.time_test:
+            out_name = f"genkicbb_size{s}_{datetime.date.today().strftime('%m%d%Y')}_timetest.silent"
+        else:
+            out_name = f"genkicbb_size{s}_{datetime.date.today().strftime('%m%d%Y')}.silent"
 
         # Apply genkic to our pose
         success = 0
