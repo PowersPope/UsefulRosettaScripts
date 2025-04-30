@@ -10,6 +10,7 @@ from typing import List, Tuple
 import datetime
 
 # decorators
+from utils.helper import flip_trans_omegabonds, peptide_stub_mover
 from utils.decorators import timeit
 
 # Rosetta imports
@@ -32,6 +33,7 @@ class BackboneGeneration:
         debug: bool = False,
         randomize_root: bool = True,
         time_test: bool = False,
+        empty_pose_test: bool = False,
         ):
         """
         Setup and init our Pyrosetta instance to generate macrocycle backbones + Design
@@ -42,6 +44,8 @@ class BackboneGeneration:
         :randomize_root: This should be set if your root residue (which is an anchor) needs
             to be randomized. If you had a target, you would not randomize this
         :time_test: Comparison for XML vs PyRosetta. Since XML writes to disk every struct
+        :empty_pose_test: Instead of using pose_from_sequence, we will create an empty
+            pose and then append to it.
         """
         # Set up our instance of PyRosetta
         # init("-mute all -score:weights ref2015 -out:file:silent_struct_type binary -symmetric_gly_tables true")
@@ -71,6 +75,9 @@ class BackboneGeneration:
 
         # Debug class
         self.DEBUG = debug
+
+        # Empty Pose test
+        self.empty_pose_test = empty_pose_test
 
 
     def residues_to_perturb(self, peptide_length: int, root: int) -> List[int]:
@@ -351,7 +358,7 @@ class BackboneGeneration:
         declarebond.apply(pose)
         return 0
 
-    def generate_initial_empty_glycine_pose(self, N: int) -> io.Pose:
+    def generate_initial_empty_glycine_pose(self, N: int) -> core.pose.Pose:
        """
        Generate a single cyclic peptide pose of glycines that is of size N
 
@@ -361,16 +368,25 @@ class BackboneGeneration:
 
        RETURNS
        -------
-       :gly_pose (io.Pose): A Rosetta Pose instance that is all glycines of desired N-mer size
+       :gly_pose (core.pose.Pose): A Rosetta Pose instance that is all glycines of desired N-mer size
            FoldTree has been updated and is uses the middle residue as a root
            Cutpoints are added to the ends and a peptide bond is declared.
        """
-       # fill with glycines
-       gly_pose = io.pose_from_sequence(
-           seq="G"*N,
-           res_type="fa_standard",
-           auto_termini=False,
-       )
+
+       if self.empty_pose_test:
+           empty_pose = core.pose.Pose()
+           gly_pose = peptide_stub_mover(
+                   pose = empty_pose,
+                   residue_type = "GLY",
+                   sequence_len = N,
+                   )
+           flip_trans_omegabonds(gly_pose, N)
+       else:
+           gly_pose = io.pose_from_sequence(
+               seq="G"*N,
+               res_type="fa_standard",
+               auto_termini=False,
+           )
 
        # Set the fold tree
        root = self.foldtree_define(N)
@@ -514,9 +530,10 @@ if __name__ == "__main__":
     p.add_argument("--time-test", action="store_true", help="This is only for a time comparison between XML and PyRosetta \
             as XML writes to disk for every structure, but here we do not. This can be done for time comparisons. Dont set \
             as it will make the process slower.")
+    p.add_argument("--empty-pose-test", action="store_true", help="Run an empty pose test, since this is more representative of the XML script")
     args = p.parse_args()
 
-    bbgen = BackboneGeneration(args.debug, args.sample_root, args.time_test)
+    bbgen = BackboneGeneration(args.debug, args.sample_root, args.time_test, args.empty_pose_test)
     for s in args.size:
         bbgen.generate_ensemble(s, args.nstruct, args.nofilter)
 
