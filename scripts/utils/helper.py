@@ -686,6 +686,46 @@ def design_peptide(
     designMover.apply(pose)
     return 0
 
+def relax_selection(
+        currpose: core.pose.Pose,
+        res_selection: rs,
+        scorefxn: ScoreFunction,
+        script: str = "monomer",
+        cartesian: bool = False,
+        ) -> int:
+    """Complex relaxation for the specific areas
+
+    PARAMS
+    ------
+    :currpose: The current non-empty pose
+    :res_selection: residue selection which is specified
+    :scorefxn: The applied scorefunction
+    :script: Monomer or Complex
+    :cartesian: Allow cartesian 
+
+    RETURNS
+    -------
+    Inplace relaxation of selection
+    """
+    # setup the mmf
+    mmf = setup_mmf(
+            specific_bb_selector = res_selection,
+            specific_chi_selector = res_selection,
+            specific_bondangles_selector = res_selection,
+            specific_bondlengths_selector = res_selection,
+            cartesian = cartesian,
+            )
+
+    # Now set up our FastRelax Mover
+    fr = protocols.relax.FastRelax(scorefxn_in = scorefxn, script_file = "MonomerDesign2019" if script == "monomer" else "InterfaceDesign2019")
+    fr.set_movemap_factory(mmf)
+    fr.set_enable_design(False)
+
+    # Now apply our relax to the pose
+    fr.apply(currpose)
+    return 0
+
+
 def relax_sidechains(
         pose: core.pose.Pose,
         res_selection: rs,
