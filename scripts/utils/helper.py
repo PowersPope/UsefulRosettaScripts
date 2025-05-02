@@ -475,7 +475,7 @@ def setup_taskfactory(
     if allow_dchiral:
         dchiral_aminos = CustomBaseTypePackerPalette()
         # Setup dchiral_aminos
-        dchiral_amino.parse_additional_residue_types(
+        dchiral_aminos.parse_additional_residue_types(
                 "DALA,DLEU,DILE,DVAL,DTHR,DSER,DASP,DASN,DGLN,DGLU,DMET,DARG,DHIS,DLYS,DPHE,DTRP,DTYR,DPRO"
                 )
 
@@ -670,7 +670,7 @@ def design_peptide(
     # Set the minimize method
     designMover.min_type("lbfgs_armijo_nonmonotone")
     # Set the number of iterations
-    designMover.max_iter(5) # Might need to be edited
+    designMover.max_iter(200) # Might need to be edited
     # Enable Design
     designMover.set_enable_design(True)
     
