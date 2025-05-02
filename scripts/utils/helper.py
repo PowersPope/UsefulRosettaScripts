@@ -11,14 +11,18 @@ import pyrosetta.rosetta.core as core
 import pyrosetta.rosetta.core.select.residue_selector as rs
 import pyrosetta.rosetta.protocols.simple_moves as sm
 import pyrosetta.rosetta.protocols as protocols
+import pyrosetta.rosetta.core.pack.task.operation as opt
 from pyrosetta.rosetta.core.scoring import ScoreFunction
 from pyrosetta.rosetta.std import map_core_id_AtomID_core_id_AtomID
 from pyrosetta.rosetta.core.id import AtomID
+from pyrosetta.rosetta.core.pack.task import TaskFactory
+from pyrosetta.rosetta.protocols.denovo_design.movers import FastDesign
+from pyrosetta.rosetta.core.select.movemap import MoveMapFactory
+from pyrosetta.rosetta.core.pack.palette import CustomBaseTypePackerPalette
 
 # python imports
-import collections
 import os
-from typing import Union, List
+from typing import Union, List, Tuple
 
 
 ### Classes (Empty for now, as the funcitons should be modular enough to
@@ -145,23 +149,28 @@ def remove_term_variants(pose: core.pose.Pose,
     modifyvariant_cterm.apply(pose)
     return 0
 
-def modify_termini_to_cutpoints(pose: core.pose.Pose) -> int:
+def modify_termini_to_cutpoints(pose: core.pose.Pose,
+                                start: int = 1,
+                                end: int = 8,
+                                ) -> int:
     """
     Apply inplace the correct variant types to the N- & C-termini
 
     PARAMS
     ------
     :pose: Un cyclized pose
+    :start: resi of the N-termini
+    :end: resi of the C-termini
     """
     # Modify the variant types
     modifyvariant_nterm = sm.ModifyVariantTypeMover()
     modifyvariant_nterm.set_additional_type_to_add("CUTPOINT_UPPER")
-    modifyvariant_nterm.set_residue_selector(rs.ResidueIndexSelector(1))
+    modifyvariant_nterm.set_residue_selector(rs.ResidueIndexSelector(start))
     modifyvariant_nterm.apply(pose)
 
     modifyvariant_cterm = sm.ModifyVariantTypeMover()
     modifyvariant_cterm.set_additional_type_to_add("CUTPOINT_LOWER")
-    modifyvariant_cterm.set_residue_selector(rs.ResidueIndexSelector(pose.total_residue()))
+    modifyvariant_cterm.set_residue_selector(rs.ResidueIndexSelector(end))
     modifyvariant_cterm.apply(pose)
 
     pose.update_residue_neighbors()
@@ -250,16 +259,19 @@ def load_macrocycle_pdb(
     return pose
 
 def grab_neighbors(
-        home_chain: int,
+        focus_chain: int,
         distance: float = 4.0,
+        include_focus_chain: bool = True,
         ) -> rs.NeighborhoodResidueSelector:
     """Grab the residue neighbors that are within some distance cutoff
-    of the home_chain
+    of the focus_chain
 
     PARAMS
     ------
-    :home_chain: The chain we want to use as our origin
+    :focus_chain: The chain we want to use as our origin
     :distance: How far away from the origin, do we check to see
+    :include_focus_chain: Whether to include the focus (focus_chain) or not
+        in the resulting selection
 
     RETURNS
     -------
@@ -269,9 +281,10 @@ def grab_neighbors(
     # setup our neighborhood selector
     neighborSel = rs.NeighborhoodResidueSelector()
     neighborSel.set_focus_selector(
-            rs.ChainSelector(home_chain),
+            rs.ChainSelector(focus_chain),
             )
     neighborSel.set_distance(distance)
+    neighborSel.set_include_focus_in_subset(include_focus_chain)
     return neighborSel
 
 def setup_mmf(
@@ -286,13 +299,14 @@ def setup_mmf(
         specific_bondangles_selector: Union[List, rs] = [],
         specific_bondlengths_selector: Union[List, rs] = [],
         specific_nu_selector: Union[List, rs] = [],
+        cartesian: bool = False,
         ) -> core.select.movemap.MoveMapFactory:
     mmf = core.select.movemap.MoveMapFactory()
     # Set all movements specified
     mmf.all_bb(bb)
     mmf.all_chi(chi)
-    mmf.all_bondangles(bondangles)
-    mmf.all_bondlengths(bondlengths)
+    mmf.all_bondangles(bondangles and cartesian)
+    mmf.all_bondlengths(bondlengths and cartesian)
     mmf.all_branches(False)
     mmf.all_jumps(jumps)
     mmf.all_nu(nu)
@@ -308,12 +322,12 @@ def setup_mmf(
                 core.select.movemap.move_map_action.mm_enable,
                 specific_chi_selector,
                 )
-    if specific_bondangles_selector:
+    if specific_bondangles_selector and cartesian:
         mmf.add_bondangles_action(
                 core.select.movemap.move_map_action.mm_enable,
                 specific_bondangles_selector,
                 )
-    if specific_bondlengths_selector:
+    if specific_bondlengths_selector and cartesian:
         mmf.add_bondlengths_action(
                 core.select.movemap.move_map_action.mm_enable,
                 specific_bondlengths_selector,
@@ -431,10 +445,252 @@ def load_silentfile(filepath: str) -> core.import_pose.pose_stream.PoseInputStre
     silentfile = core.import_pose.pose_stream.SilentFilePoseInputStream(filepath)
     return silentfile
 
+def setup_taskfactory(
+        task_operations: List[opt] = [],
+        allow_dchiral: bool = False,
+        ) -> TaskFactory:
+    """Setup a taskfactory for use in design or relax
+
+    PARAMS
+    ------
+    :task_operations: A list of task operations that will be passed to the tf.
+        The order of the list matters, as the first item will be passed first.
+        This is important because taskoperations can be overwritten.
+        These should be specified in your specific script
+    :allow_dchiral: Allow the design of dchiral amino acids
+
+    RETURNS
+    --------
+    :tf: A setup taskfactory ready for use in FastDesign or FastRelax
+    """
+    # init our taskfactory
+    tf = TaskFactory()
+
+    # Good defaults to include
+    # Carry over command line arguments like -ex1 -ex2
+    tf.push_back(opt.InitializeFromCommandline())
+    # Include the current rotamer from the pose into the first pack search
+    tf.push_back(opt.IncludeCurrent())
+
+    if allow_dchiral:
+        dchiral_aminos = CustomBaseTypePackerPalette()
+        # Setup dchiral_aminos
+        dchiral_amino.parse_additional_residue_types(
+                "DALA,DLEU,DILE,DVAL,DTHR,DSER,DASP,DASN,DGLN,DGLU,DMET,DARG,DHIS,DLYS,DPHE,DTRP,DTYR,DPRO"
+                )
+
+        tf.set_packer_palette(dchiral_aminos)
+
+    # Apply our list of operations
+    for taskop in task_operations:
+        tf.push_back(taskop)
+    return tf
+
+def hydrogen_bond_check(
+        pose: core.pose.Pose,
+        resi: int,
+        ) -> bool:
+    """Check if the current residue in our pose is forming any
+    mainchain hydrogen bonds. Return True yes, False if not
+
+    PARAMS
+    ------
+    :pose: Non empty pose
+    :resi: The index of the residue to check (1-index)
+
+    RETURNS
+    -------
+    True/False
+    """
+    # init a hbond set
+    hbset = core.scoring.hbonds.HBondSet(
+            pose = pose, 
+            bb_only = True,
+            )
+
+    # Now check if it is either involved in donor/acceptor interactions
+    if not (hbset.don_bbg_in_bb_bb_hbond(resi) or hbset.acc_bbg_in_bb_bb_hbond(resi)):
+        return True
+    else:
+        return False
+
+def mutate_residue(
+        pose: core.pose.Pose,
+        resi: int,
+        residue_type: str,
+        heterochiral: bool = True,
+        ) -> int:
+    """Check if the current residue in our pose is forming any
+    mainchain hydrogen bonds. Return True yes, False if not
+
+    PARAMS
+    ------
+    :pose: Non empty pose
+    :resi: The index of the residue to check (1-index)
+    :residue_type: the canonical residue type
+    :heterochiral: if true then check for to see if the phi is pos/neg
+        mutate to the correct enantiomer
+
+    RETURNS
+    -------
+    Mutates in place the pose to our desired residue_type.
+    """
+    # first if check for heterochiral bool
+    if heterochiral:
+        # This is within the D chiral structural space, so lets
+        # mutate to the correct enantiomer
+        if pose.phi(resi) > 0:
+            residue_type = "D"+residue_type
+    
+    # Now setup the mutate mover
+    mutateRes = sm.MutateResidue()
+    mutateRes.set_preserve_atom_coords(True)
+    mutateRes.set_target(resi)
+    mutateRes.set_res_name(residue_type)
+
+    mutateRes.apply(pose)
+    return 0
+
+def search_proline_mutate(
+        pose: core.pose.Pose,
+        residue_selection: rs,
+        number_prolines: int = 1,
+        ) -> Tuple[bool, List[int]]:
+    """Search the rama of residues that could be a proline
+    if they are not invovled in hydrogen bonding then mutate until
+    number_prolines is satisfied. For macrocycles having at least one
+    proline can help with stability, given its restricted DoFs.
+
+    PARAMS
+    ------
+    :pose: Our filled pose object
+    :residue_selection: The residues we would like to scan
+    :number_prolines: The number of desired prolines at the end
+
+    RETURNS
+    -------
+    True/False: whether we were able to satifisy our number_prolines criteria
+        or not
+    """
+    # init our count
+    mutated_prolines = 0
+    proline_positions = list()
+
+    # grab the proline positions
+    dpro_selector = rs.BinSelector()
+    dpro_selector.set_bin_name("DPRO")
+    dpro_selector.set_bin_params_file_name("PRO_DPRO")
+    dpro_selector.initialize_and_check()
+    pro_selector = rs.BinSelector()
+    pro_selector.set_bin_name("LPRO")
+    pro_selector.set_bin_params_file_name("PRO_DPRO")
+    pro_selector.initialize_and_check()
+
+    # only select the positions that are in our residue_selection
+    specific_dprolines = rs.AndResidueSelector()
+    specific_dprolines.add_residue_selector(residue_selection)
+    specific_dprolines.add_residue_selector(dpro_selector)
+
+    specific_lprolines = rs.AndResidueSelector()
+    specific_lprolines.add_residue_selector(residue_selection)
+    specific_lprolines.add_residue_selector(pro_selector)
+
+    specific_prolines = rs.OrResidueSelector()
+    specific_prolines.add_residue_selector(specific_lprolines)
+    specific_prolines.add_residue_selector(specific_dprolines)
+
+
+    # Get the resi numbers for looping
+    specific_proline_resi = core.select.get_residues_from_subset(specific_prolines.apply(pose))
+
+    # There are no positions that match our criteria within our selection. An empty list is returned, so exit
+    if not specific_proline_resi:
+        assert specific_proline_resi == {}, f"proline resi are not empty. There is a bug: {len(specific_proline_resi)}"
+        return (False, proline_positions)
+
+    for ir in specific_proline_resi:
+        if not hydrogen_bond_check(pose, ir):
+            mutate_residue(pose, ir, "PRO")
+            mutated_prolines+=1
+            proline_positions.append(ir)
+            if mutated_prolines == number_prolines: return (True, proline_positions)
+    # If we get to here, then we did not mutate enough positions to meet our criteria therefore the filter fails.
+    # However, our pose was still possibly mutated if you have more then 1 desired proline. (keep in mind)
+    return (False, proline_positions)
+
+def generate_resfile_operation(
+        filename: str,
+        res_selector: rs,
+        ) -> opt:
+    """Generate a resfile operations task. Essentially this is useful for specifying
+    L- & D-chiral amino acids (combine with PhiSelector)
+
+    PARAMS
+    ------
+    :filename: The resfile
+    :res_selector: The selection this resfile will apply to.
+
+    RETURNS
+    -------
+    opt object that operates on that selection
+    """
+    resfile = opt.ReadResfile()
+    resfile.filename(filename)
+    resfile.set_residue_selector(res_selector)
+    return resfile
+
+def design_peptide(
+        pose: core.pose.Pose,
+        tf: TaskFactory,
+        mmf: MoveMapFactory,
+        scorefxn: ScoreFunction,
+        cartesian: bool = False,
+        script: str = "monomer",
+        ) -> int:
+    """Design our macrocycle pose, in the context of the target.
+    TaskFactory and MoveMapFactory are alrady specified before this.
+
+    PARAMS
+    ------
+    :pose: Our complex pose
+    :tf: Our already specified TaskFactory object
+    :mmf: Our mmf which determines what is allowed to move.
+    :scorefxn: Our design score function (either cartesian or not)
+    :cartesian: Allow cartesian minimization or not.
+    :allow_dchiral: If true then allow dchiral design
+
+    RETURNS
+    -------
+    Our inplace designed + relaxed pose
+    """
+    # init our design mover
+    designMover = FastDesign(scorefxn_in = scorefxn, script_file="MonomerDesign2019" if script == "monomer" else "InterfaceDesign2019")
+    # Set Cartesian non-ideal minimization
+    designMover.cartesian(cartesian)
+    # Set the minimize method
+    designMover.min_type("lbfgs_armijo_nonmonotone")
+    # Set the number of iterations
+    designMover.max_iter(5) # Might need to be edited
+    # Enable Design
+    designMover.set_enable_design(True)
+    
+    # Set these based on cartesian passed setting
+    designMover.minimize_bond_angles(cartesian)
+    designMover.minimize_bond_lengths(cartesian)
+
+    # set our passed movemap and taskfactories
+    designMover.set_movemap_factory(mmf)
+    designMover.set_task_factory(tf)
+
+    # now apply to our pose
+    designMover.apply(pose)
+    return 0
+
 def relax_sidechains(
         pose: core.pose.Pose,
         res_selection: rs,
         scorefxn: ScoreFunction,
+        script: str = "monomer",
         ) -> int:
     """Take a pose and relax the residues that are selected within
     the passed selector. Backbone will be fixed
@@ -453,10 +709,10 @@ def relax_sidechains(
     mmf = setup_mmf(specific_chi_selector=res_selection)
 
     # Now set up our FastRelax Mover
-    fr = protocols.relax.FastRelax()
+    fr = protocols.relax.FastRelax(scorefxn_in = scorefxn, script_file = "MonomerDesign2019" if script == "monomer" else "InterfaceDesign2019")
     fr.set_movemap_factory(mmf)
     fr.set_enable_design(False)
-    fr.set_scorefxn(scorefxn)
+#     fr.set_scorefxn(scorefxn)
 
     # Now apply our relax to the pose
     fr.apply(pose)
@@ -489,8 +745,8 @@ def init_scorefunction(default: bool=False,) -> ScoreFunction:
     scorefxn.set_weight(core.scoring.dihedral_constraint, 1.0)
     scorefxn.set_weight(core.scoring.angle_constraint, 1.0)
     scorefxn.set_weight(core.scoring.chainbreak, 1.0)
-    emopts = core.scoring.methods.EnergyMethodOptions( scorefxn.energy_method_options() ) # make a copy
-    emopts.hbond_options().decompose_bb_hb_into_pair_energies( True )
-    scorefxn.set_energy_method_options( emopts )
+    emopts = core.scoring.methods.EnergyMethodOptions(scorefxn.energy_method_options())
+    emopts.hbond_options().decompose_bb_hb_into_pair_energies(True)
+    scorefxn.set_energy_method_options(emopts)
     return scorefxn
 
