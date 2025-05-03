@@ -40,6 +40,7 @@ def compare_rmsd_pose(
 
     # apply the filter
     rmsdMetric.apply(currpose, "relax_after_design")
+    currpose.scores["rmsd_relax_after_design"] = rmsdMetric.calculate(currpose)
     return rmsdMetric.calculate(currpose)
 
 
@@ -74,6 +75,7 @@ def determine_internal_bb_hbonds(
     bb_hbond_filter.set_residue_selector(cursel)
     bb_hbond_filter.apply(currpose)
 
+    currpose.scores["design_bb_hbonds"] = bb_hbond_filter.report_sm(currpose)
     return bb_hbond_filter.report_sm(currpose)
 
 
