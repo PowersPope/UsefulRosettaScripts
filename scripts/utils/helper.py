@@ -12,6 +12,7 @@ import pyrosetta.rosetta.core.select.residue_selector as rs
 import pyrosetta.rosetta.protocols.simple_moves as sm
 import pyrosetta.rosetta.protocols as protocols
 import pyrosetta.rosetta.core.pack.task.operation as opt
+import pyrosetta.rosetta.core.io.silent as silent
 from pyrosetta.rosetta.core.scoring import ScoreFunction
 from pyrosetta.rosetta.std import map_core_id_AtomID_core_id_AtomID
 from pyrosetta.rosetta.core.id import AtomID
@@ -27,6 +28,50 @@ from typing import Union, List, Tuple
 
 ### Classes (Empty for now, as the funcitons should be modular enough to
 ### use within a class)
+class SilentFileWrite:
+    def __init__(
+            self,
+            outname: str = "test",
+            ):
+        # Setup the silentFile output
+        self.opts = silent.SilentFileOptions()
+        self.opts.in_fullatom(True)
+        self.opts.set_binary_output(True)
+        self.silentFile = silent.SilentFileData(opts)
+        self.outname = outname
+
+    def generate_plus_add_structure(self,
+                      pose: core.pose.Pose,
+                      structName: str,
+                      ) -> int:
+        """Take a structure and add it to our silentfiledata
+
+        PARAMS
+        ------
+        :pose: The filled pose
+        """
+        struct = silent.BinarySilentStruct(
+                self.opts, pose, structName,
+                )
+        self.silentFile.add_structure(struct)
+        return 0
+
+    def generate_plus_write_to_silentfile(
+            self,
+            pose: core.pose.Pose,
+            structName: str,
+            ) -> int:
+        struct = silent.BinarySilentStruct(
+                self.opts, pose, structName,
+                )
+        self.silentFile.write_silent_struct(struct, self.outname)
+        return 0
+
+    def write_all(self) -> int:
+        """Write all of the added structues (use in conjunction with generate_plus_add_structure)
+        """
+        self.silentFile.write_all(self.outname)
+        return 0
 
 ### Functions
 def peptide_stub_mover(
