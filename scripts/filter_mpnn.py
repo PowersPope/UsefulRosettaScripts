@@ -78,7 +78,11 @@ if __name__ == "__main__":
                 "postrelax_bb_hbonds",
                 )
 
+        # Get the final score of our outputs
+        scorefxn(pose)
+
         outSilentFile.generate_plus_add_structure(pose, f"struct_relax_{str(n).zfill(6)}")
         n+=1
+        pose.clear()
 
     outSilentFile.write_all()
