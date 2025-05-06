@@ -42,7 +42,7 @@ if __name__ == "__main__":
         # Clone our pose
         init_pose = pose.clone()
 
-        # get the number of bb-bb hbonds
+        # get the number of bb-bb hbonds (before relaxing)
         bb_hbonds = filterfuncs.determine_internal_bb_hbonds(
                 pose,
                 rs.ChainSelector(1),
@@ -67,19 +67,18 @@ if __name__ == "__main__":
                 pose,
                 rs.ChainSelector(1),
                 rs.ChainSelector(1),
-                "after_relax_rmsd",
+                "after_relax_heavybb_",
+                )
+
+        # get the number of bb-bb hbonds
+        bb_hbonds = filterfuncs.determine_internal_bb_hbonds(
+                pose,
+                rs.ChainSelector(1),
+                scorefxn,
+                "postrelax_bb_hbonds",
                 )
 
         outSilentFile.generate_plus_add_structure(pose, f"struct_relax_{str(n).zfill(6)}")
         n+=1
 
     outSilentFile.write_all()
-        
-
-
-
-
-
-
-
-
