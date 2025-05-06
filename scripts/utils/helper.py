@@ -37,7 +37,7 @@ class SilentFileWrite:
         self.opts = silent.SilentFileOptions()
         self.opts.in_fullatom(True)
         self.opts.set_binary_output(True)
-        self.silentFile = silent.SilentFileData(opts)
+        self.silentFile = silent.SilentFileData(self.opts)
         self.outname = outname
 
     def generate_plus_add_structure(self,
