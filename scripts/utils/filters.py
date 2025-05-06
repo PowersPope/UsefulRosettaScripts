@@ -18,6 +18,7 @@ def compare_rmsd_pose(
         currpose: core.pose.Pose,
         refsel: residue_selector,
         cursel: residue_selector,
+        filtername: str = "rmsd_relax_after_design",
         ) -> float:
     """Generate a RMSD metric
 
@@ -27,6 +28,7 @@ def compare_rmsd_pose(
     :currpose: The current pose you want to compare
     :refsel: the selection in the reference
     :curesel: the selection in the current pose
+    :filtername: The name of our filter that will show up in the score file
 
     RETURNS
     -------
@@ -40,7 +42,7 @@ def compare_rmsd_pose(
 
     # apply the filter
     rmsdMetric.apply(currpose, "relax_after_design")
-    currpose.scores["rmsd_relax_after_design"] = rmsdMetric.calculate(currpose)
+    currpose.scores[filtername] = rmsdMetric.calculate(currpose)
     return rmsdMetric.calculate(currpose)
 
 
@@ -48,6 +50,7 @@ def determine_internal_bb_hbonds(
         currpose: core.pose.Pose,
         cursel: residue_selector,
         scorefxn: ScoreFunction,
+        filtername: str = "design_bb_hbonds",
         ) -> int:
     """Count the number of bb internal 
 
@@ -56,6 +59,7 @@ def determine_internal_bb_hbonds(
     :currpose: The current pose
     :cursel: The selection of the pose
     :scorefxn: The scorefunction used to determine hbonds
+    :filtername: The name of our filter that will show up in the score file
 
     RETURNS
     -------
@@ -75,7 +79,7 @@ def determine_internal_bb_hbonds(
     bb_hbond_filter.set_residue_selector(cursel)
     bb_hbond_filter.apply(currpose)
 
-    currpose.scores["design_bb_hbonds"] = bb_hbond_filter.report_sm(currpose)
+    currpose.scores[filtername] = bb_hbond_filter.report_sm(currpose)
     return bb_hbond_filter.report_sm(currpose)
 
 
