@@ -39,10 +39,12 @@ def compare_rmsd_pose(
     rmsdMetric.set_comparison_pose(refpose)
     rmsdMetric.set_residue_selector_reference(refsel)
     rmsdMetric.set_residue_selector(cursel)
+    rmsdMetric.set_rmsd_type(
+            core.scoring.rmsd_atoms.rmsd_protein_bb_heavy_including_O
+                             )
 
     # apply the filter
-    rmsdMetric.apply(currpose, "relax_after_design")
-    currpose.scores[filtername] = rmsdMetric.calculate(currpose)
+    rmsdMetric.apply(currpose, filtername)
     return rmsdMetric.calculate(currpose)
 
 
@@ -81,5 +83,4 @@ def determine_internal_bb_hbonds(
 
     currpose.scores[filtername] = bb_hbond_filter.report_sm(currpose)
     return bb_hbond_filter.report_sm(currpose)
-
 
