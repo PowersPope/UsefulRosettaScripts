@@ -18,9 +18,9 @@ def compare_rmsd_pose(
         currpose: core.pose.Pose,
         refsel: residue_selector,
         cursel: residue_selector,
-        filtername: str = "rmsd_relax_after_design",
+        filtername: str = "relax_after_design_",
         ) -> float:
-    """Generate a RMSD metric
+    """Generate a RMSD metric with all bb heavy atoms including O
 
     PARAMS
     ------
