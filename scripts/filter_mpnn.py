@@ -12,18 +12,18 @@ import utils.filters as filterfuncs
 import argparse
 
 from pyrosetta import init
-from pyrosetta.rosetta.core import core
+import pyrosetta.rosetta.core as core
 import pyrosetta.rosetta.core.select.residue_selector as rs
-import pyrosett.io as io
+import pyrosetta.io as io
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(help_formatter=argparse.ArgumentDefaultsHelpFormatter)
+    p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--inpath", type=str, help="path to PDB files")
     p.add_argument("--silentoutname", type=str, help="Output silent file name")
     args = p.parse_args()
 
-    init(extra_options="-mute all -out:file:silent_file_struct binary -ex1 -ex2aro -score:weigths ref2015_cart")
+    init(extra_options="-mute all -out:file:silent_struct_type binary -ex1 -ex2aro -score:weights ref2015_cart")
 
     # Setup our silentfile
     outSilentFile = helpfunc.SilentFileWrite(outname=args.silentoutname)
@@ -43,7 +43,7 @@ if __name__ == "__main__":
         init_pose = pose.clone()
 
         # get the number of bb-bb hbonds
-        bb_hbonds = filterfunc.determine_internal_bb_hbonds(
+        bb_hbonds = filterfuncs.determine_internal_bb_hbonds(
                 pose,
                 rs.ChainSelector(1),
                 scorefxn,
@@ -56,7 +56,7 @@ if __name__ == "__main__":
         # Relax our output
         helpfunc.relax_selection(
                 pose,
-                rs.ChainSelection(1),
+                rs.ChainSelector(1),
                 scorefxn,
                 "monomer",
                 True,
@@ -65,13 +65,15 @@ if __name__ == "__main__":
         rmsd = filterfuncs.compare_rmsd_pose(
                 init_pose,
                 pose,
-                rs.ChainSelection(1),
-                rs.ChainSelection(1),
+                rs.ChainSelector(1),
+                rs.ChainSelector(1),
                 "after_relax_rmsd",
                 )
 
         outSilentFile.generate_plus_add_structure(pose, f"struct_relax_{str(n).zfill(6)}")
         n+=1
+
+    outSilentFile.write_all()
         
 
 
