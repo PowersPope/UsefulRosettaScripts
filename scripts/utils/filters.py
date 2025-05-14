@@ -84,3 +84,39 @@ def determine_internal_bb_hbonds(
     currpose.scores[filtername] = bb_hbond_filter.report_sm(currpose)
     return bb_hbond_filter.report_sm(currpose)
 
+def oversat_filter(
+        currpose: core.pose.Pose,
+        scorefxn: ScoreFunction,
+        accp_selection: residue_selector,
+        donor_selection: residue_selector,
+        mainchain_only: bool,
+        max_oversat_num: int = 0,
+        ) -> bool:
+    """Determine if there are any oversaturated hbond acceptors in our pose
+
+    PARAMS
+    ------
+    :currpose: Our current pose filled object
+    :max_oversat_num: The number of allowed oversat hbond acceptors
+
+    RETURNS
+    -------
+    True if there is oversat, false if not
+    """
+    # init our filter
+    oversat = cp.OversaturatedHbondAcceptorFilter()
+    # Now apply appropriate settings
+    oversat.set_acceptor_selector(accp_selection)
+    oversat.set_consider_mainchain_only(mainchain_only)
+    oversat.set_donor_selector(donor_selection)
+    oversat.set_max_allowed_oversaturated(max_oversat_num)
+    oversat.set_scorefxn(scorefxn)
+    oversat.set_user_defined_name("oversat-check")
+    return oversat.apply(currpose)
+
+
+
+
+
+
+
