@@ -130,21 +130,24 @@ def shapeComp(
     PARAMS
     ------
     :currpose: The filled current pose
-    :jump_selection: Which jump you want to check between
+    :jump_selection: The jump you want to check between
 
     RETURNS
     -------
     ShapeComp metric
     """
+    # Setup a jump selector
+    jump_sel = core.select.jump_selector.JumpSelector()
+    jump_sel.jump(jump_selection)
     # init our shape comp
     sc = protocols.simple_filters.ShapeComplementarityFilter()
-    sc.set_jump_selector(jump_selection)
+    sc.set_jump_selector(jump_sel)
     sc.filtered_sc(0.5)
     sc.write_int_area(True)
     sc_score = sc.compute(currpose)
     return sc_score
 
-def count_nonpolar_iteractions(
+def count_nonpolar_interactions(
         currpose: core.pose.Pose,
         interfaceA: ResidueSelector,
         interfaceB: ResidueSelector,
