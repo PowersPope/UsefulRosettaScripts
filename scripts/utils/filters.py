@@ -9,15 +9,17 @@
 import pyrosetta.rosetta.core.select.residue_selector as residue_selector
 import pyrosetta.rosetta.core.simple_metrics.metrics as metrics
 import pyrosetta.rosetta.protocols.cyclic_peptide as cp
-from pyrosetta.rosetta.core.scoring import ScoreFunction
 import pyrosetta.rosetta.core as core
+
+from pyrosetta.rosetta.core.scoring import ScoreFunction
+from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 
 # Functions
 def compare_rmsd_pose(
         refpose: core.pose.Pose,
         currpose: core.pose.Pose,
-        refsel: residue_selector,
-        cursel: residue_selector,
+        refsel: ResidueSelector,
+        cursel: ResidueSelector,
         filtername: str = "relax_after_design_",
         ) -> float:
     """Generate a RMSD metric with all bb heavy atoms including O
@@ -50,7 +52,7 @@ def compare_rmsd_pose(
 
 def determine_internal_bb_hbonds(
         currpose: core.pose.Pose,
-        cursel: residue_selector,
+        cursel: ResidueSelector,
         scorefxn: ScoreFunction,
         filtername: str = "design_bb_hbonds",
         ) -> int:
@@ -116,7 +118,68 @@ def oversat_filter(
 
 
 
+def shapeComp(
+        currpose: core.pose.Pose,
+        jump_selection: int,
+        ) -> float:
+    """Calculate the shape complementarity between a jump
 
+    PARAMS
+    ------
+    :currpose: The filled current pose
+    :jump_selection: Which jump you want to check between
 
+    RETURNS
+    -------
+    ShapeComp metric
+    """
+    # init our shape comp
+    sc = protocols.simple_filters.ShapeComplementarityFilter()
+    sc.set_jump_selector(jump_selection)
+    sc.filtered_sc(0.5)
+    sc.write_int_area(True)
+    sc_score = sc.compute(currpose)
+    return sc_score
+
+def count_nonpolar_iteractions(
+        currpose: core.pose.Pose,
+        interfaceA: ResidueSelector,
+        interfaceB: ResidueSelector,
+        scorefxn: ScoreFunction,
+        apolar_res: str,
+        threshold: int = 2,
+        filtername: str = "interface_hydrophobic_filter",
+        ) -> tuple(bool,int):
+    """Count the number of interactions between two selections
+
+    PARAMS
+    ------
+    :currpose: filled pose with target and receptor
+    :interfaceA: The target/peptide interactions
+    :interfaceB: The non target interface residues
+    :scorefxn: An already defined scorefunction to be used
+    :apolar_res: The apolar residues that you are going to check if they are making contacts. A list of comma separated name3
+    :threshold: The number of residues that need to match our score_cut, to return true when applied.
+    :filtername: Set the name of the filter on the score header
+
+    RETURNS
+    -------
+    0: Bool of if it passes our threshold
+    1: Number of non-polar interactions 
+    """
+    # init our interface hydrophobic filter
+    interfaceHydrophobic = protocols.simple_filters.InterfaceHydrophobicResidueContactsFilter(
+            hydrophobic_residue_contacts_threshold = threshold,
+            target_selector = interfaceB,
+            binder_selector = interfaceA,
+            scorefxn = scorefxn,
+            score_cut = -0.5,
+            apolar_res = apolar_res,
+            )
+    # name our filter
+    interfaceHydrophobic.set_user_defined_name(filtername)
+    # Extract count
+    non_polar_count = interfaceHydrophobic.score(currpose)
+    return interfaceHydrophobic.apply(currpose), non_polar_count
 
 
