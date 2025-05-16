@@ -15,6 +15,8 @@ import pyrosetta.rosetta.core as core
 from pyrosetta.rosetta.core.scoring import ScoreFunction
 from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 
+from typing import Tuple, Union
+
 # Functions
 def compare_rmsd_pose(
         refpose: core.pose.Pose,
@@ -150,7 +152,7 @@ def count_nonpolar_iteractions(
         apolar_res: str = "PHE,ILE,LEU,MET,PRO,THR,VAL,TRP,TYR,DPH,DIL,DLE,DME,DPR,DTH,DVA,DTR,DTY",
         threshold: int = 2,
         filtername: str = "interface_hydrophobic_filter",
-        ) -> tuple(bool,int):
+        ) -> Tuple[Union[bool,float]]:
     """Count the number of interactions between two selections
 
     PARAMS
