@@ -137,7 +137,7 @@ def shapeComp(
     ShapeComp metric
     """
     # Setup a jump selector
-    jump_sel = core.select.jump_selector.JumpSelector()
+    jump_sel = core.select.jump_selector.JumpIndexSelector()
     jump_sel.jump(jump_selection)
     # init our shape comp
     sc = protocols.simple_filters.ShapeComplementarityFilter()
