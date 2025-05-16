@@ -8,6 +8,7 @@
 # from pyrosetta.rosetta.protocols.rosetta_scripts import XmlObjects
 import pyrosetta.rosetta.core.select.residue_selector as residue_selector
 import pyrosetta.rosetta.core.simple_metrics.metrics as metrics
+import pyrosetta.rosetta.protocols as protocols
 import pyrosetta.rosetta.protocols.cyclic_peptide as cp
 import pyrosetta.rosetta.core as core
 
@@ -146,7 +147,7 @@ def count_nonpolar_iteractions(
         interfaceA: ResidueSelector,
         interfaceB: ResidueSelector,
         scorefxn: ScoreFunction,
-        apolar_res: str,
+        apolar_res: str = "PHE,ILE,LEU,MET,PRO,THR,VAL,TRP,TYR,DPH,DIL,DLE,DME,DPR,DTH,DVA,DTR,DTY",
         threshold: int = 2,
         filtername: str = "interface_hydrophobic_filter",
         ) -> tuple(bool,int):
@@ -180,6 +181,100 @@ def count_nonpolar_iteractions(
     interfaceHydrophobic.set_user_defined_name(filtername)
     # Extract count
     non_polar_count = interfaceHydrophobic.score(currpose)
+    # return the bool, but also cash to our pose score
     return interfaceHydrophobic.apply(currpose), non_polar_count
+
+
+def count_polar_interactions(
+        currpose: core.pose.Pose,
+        interfaceA: ResidueSelector,
+        interfaceB: ResidueSelector,
+        filtername_prefix: str = "polar_interactions_count_",
+        ) -> int:
+    """Count the number of non-covalent polar interactions across the two selections
+
+    PARAMS
+    ------
+    :currpose: filled pose with target and receptor
+    :interfaceA: The target/peptide interactions
+    :interfaceB: The non target interface residues
+    :filtername_prefix: Set the prefix name of the filter on the score header
+
+    RETURNS
+    -------
+    Number of polar interactions 
+    """
+    # Setup our filter
+    hbondMetric = core.simple_metrics.per_residue_metrics.HbondMetric()
+    # Setup our selectors
+    hbondMetric.set_include_self(False)
+    hbondMetric.set_residue_selector(interfaceA)
+    hbondMetric.set_residue_selector2(interfaceB)
+    # Apply it, it will get stashed in our pose's score
+    hbondMetric.apply(currpose, prefix=filtername_prefix)
+    return 0
+
+def grab_name3_sequence(
+        currpose: core.pose.Pose,
+        selection: ResidueSelector,
+        filtername: str = "selection_sequence",
+        ) -> str:
+    """Grab the three letter code in a - separated string of the selection
+
+    PARAMS
+    ------
+    :currpose: The filled posed
+    :selection: The residue/chain subset we want the residue names of
+    :filtername: The three letter sequence filtername in the pose score
+
+    RETURNS
+    -------
+    :selection_residues_name: A string of joined three letter residue names
+    """
+    # Apply our selection to get the residue index
+    resi_sel = selection.apply(currpose)
+
+    # init our return variable list 
+    selection_residues = list()
+
+    # now loop over and grab names
+    for resi in resi_sel:
+        selection_residues.append(currpose.residue(resi).name3())
+
+    selection_residues_name = "-".join(selection_residues)
+    currpose.scores[filtername] = selection_residues_name
+    return selection_residues_name
+
+def score_selection_outofcontext(
+        currpose: core.pose.Pose,
+        selection: ResidueSelector,
+        scorefxn: ScoreFunction,
+        filtername: str = "peptide_score_outofcontext",
+        ) -> float:
+    """Take our selection out of the context it is in (such as being bound) and
+    score it alone
+
+    PARAMS
+    ------
+    :currpose: Our filled multichain pose
+    :selection: The chain/selection we would like to score by itself
+    :scorefxn: Scorefunction, we want to use
+
+    RETURNS
+    -------
+    :score: The out of context score of our selection
+    """
+    # init our filter
+    scorePose = protocols.fold_from_loops.ScorePoseSementFromResidueSelectorFilter()
+    scorePose.in_context(False)
+    scorePose.scorefxn(scorefxn)
+    scorePose.residue_selector(selection)
+    scorePose.set_user_defined_name(filtername)
+    # now apply to our pose
+    score = scorePose.compute(currpose)
+    # Add to pose score
+    pose.scores[filtername] = score
+    return score
+
 
 
