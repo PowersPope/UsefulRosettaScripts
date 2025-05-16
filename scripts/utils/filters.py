@@ -117,6 +117,7 @@ def oversat_filter(
     oversat.set_max_allowed_oversaturated(max_oversat_num)
     oversat.set_scorefxn(scorefxn)
     oversat.set_user_defined_name("oversat-check")
+    currpose.scores["oversat-check"] = oversat.report_sm(currpose)
     return oversat.apply(currpose)
 
 
@@ -242,7 +243,7 @@ def grab_name3_sequence(
     :selection_residues_name: A string of joined three letter residue names
     """
     # Apply our selection to get the residue index
-    resi_sel = selection.apply(currpose)
+    resi_sel = selection.selection_positions(currpose)
 
     # init our return variable list 
     selection_residues = list()
@@ -275,7 +276,7 @@ def score_selection_outofcontext(
     :score: The out of context score of our selection
     """
     # init our filter
-    scorePose = protocols.fold_from_loops.ScorePoseSementFromResidueSelectorFilter()
+    scorePose = protocols.fold_from_loops.filters.ScorePoseSegmentFromResidueSelectorFilter()
     scorePose.in_context(False)
     scorePose.scorefxn(scorefxn)
     scorePose.residue_selector(selection)
@@ -283,7 +284,7 @@ def score_selection_outofcontext(
     # now apply to our pose
     score = scorePose.compute(currpose)
     # Add to pose score
-    pose.scores[filtername] = score
+    currpose.scores[filtername] = score
     return score
 
 
