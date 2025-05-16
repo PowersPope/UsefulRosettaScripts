@@ -12,6 +12,7 @@ import pyrosetta.rosetta.core.select.residue_selector as rs
 import pyrosetta.rosetta.protocols.simple_moves as sm
 import pyrosetta.rosetta.protocols as protocols
 import pyrosetta.rosetta.core.pack.task.operation as opt
+from pyrosetta.rosetta.core.pack.task.operation import TaskOperation
 import pyrosetta.rosetta.core.io.silent as silent
 from pyrosetta.rosetta.core.scoring import ScoreFunction
 from pyrosetta.rosetta.std import map_core_id_AtomID_core_id_AtomID
@@ -20,6 +21,7 @@ from pyrosetta.rosetta.core.pack.task import TaskFactory
 from pyrosetta.rosetta.protocols.denovo_design.movers import FastDesign
 from pyrosetta.rosetta.core.select.movemap import MoveMapFactory
 from pyrosetta.rosetta.core.pack.palette import CustomBaseTypePackerPalette
+from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 
 # python imports
 import os
@@ -339,11 +341,11 @@ def setup_mmf(
         bondlengths: bool = False,
         nu: bool = False,
         jumps: bool = False,
-        specific_bb_selector: Union[List, rs] = [],
-        specific_chi_selector: Union[List, rs] = [],
-        specific_bondangles_selector: Union[List, rs] = [],
-        specific_bondlengths_selector: Union[List, rs] = [],
-        specific_nu_selector: Union[List, rs] = [],
+        specific_bb_selector: Union[List, ResidueSelector] = [],
+        specific_chi_selector: Union[List, ResidueSelector] = [],
+        specific_bondangles_selector: Union[List, ResidueSelector] = [],
+        specific_bondlengths_selector: Union[List, ResidueSelector] = [],
+        specific_nu_selector: Union[List, ResidueSelector] = [],
         cartesian: bool = False,
         ) -> core.select.movemap.MoveMapFactory:
     mmf = core.select.movemap.MoveMapFactory()
@@ -491,7 +493,7 @@ def load_silentfile(filepath: str) -> core.import_pose.pose_stream.PoseInputStre
     return silentfile
 
 def setup_taskfactory(
-        task_operations: List[opt] = [],
+        task_operations: List[TaskOperation] = [],
         allow_dchiral: bool = False,
         ) -> TaskFactory:
     """Setup a taskfactory for use in design or relax
@@ -666,7 +668,7 @@ def search_proline_mutate(
 def generate_resfile_operation(
         filename: str,
         res_selector: rs,
-        ) -> opt:
+        ) -> TaskOperation:
     """Generate a resfile operations task. Essentially this is useful for specifying
     L- & D-chiral amino acids (combine with PhiSelector)
 
