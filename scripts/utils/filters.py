@@ -124,6 +124,7 @@ def oversat_filter(
 def shapeComp(
         currpose: core.pose.Pose,
         jump_selection: int,
+        filtername: str = "shapeComp",
         ) -> float:
     """Calculate the shape complementarity between a jump
 
@@ -145,6 +146,7 @@ def shapeComp(
     sc.filtered_sc(0.5)
     sc.write_int_area(True)
     sc_score = sc.compute(currpose)
+    currpose.scores[filtername] = sc_score
     return sc_score
 
 def count_nonpolar_interactions(
@@ -217,6 +219,9 @@ def count_polar_interactions(
     hbondMetric.set_residue_selector2(interfaceB)
     # Apply it, it will get stashed in our pose's score
     hbondMetric.apply(currpose, prefix=filtername_prefix)
+    score = hbondMetric.calculate(currpose)
+    print(score)
+    currpose.scores[filtername_prefix] = score
     return 0
 
 def grab_name3_sequence(
