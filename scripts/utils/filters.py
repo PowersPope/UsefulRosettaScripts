@@ -288,4 +288,65 @@ def score_selection_outofcontext(
     return score
 
 
+def interface_analyzer(
+        currpose: core.pose.Pose,
+        scorefxn: ScoreFunction,
+        pack_separated: bool = True,
+        pack_before_separate: bool = True,
+        pack_rounds: int = 1,
+        packstat: bool = True,
+        sasa_separated: bool = True,
+        interface_energy: bool = True,
+        interface_shapecomp: bool = True,
+        dSASA: bool = True,
+        hbond_sasaE: bool = True,
+        dHbond_unsat: bool = True,
+        jump_sel: int = 1,
+        prefix_scorefile: str = "intAnalyzer_"
+        ) -> int:
+    """Perform a multitude of interface analyzer tasks that will be computed, if specified
 
+    PARAMS
+    ------
+    :currpose: The current filled pose
+    :selectionA: A selection within the pose
+    :scorefxn: A predefined scorefunction
+    :pack_separated: After separating repack the interface
+    :pack_before_separate: Pack interface before separating
+    :pack_rounds: Number of packing rounds
+    :packstat: Run packstat
+    :sasa_separated: Calculate the sasa of separated interfaces
+    :interface_energy: Calculate the interface energy score
+    :interface_shapecomp: Calculate the shapeComp
+    :dSASA: Calculate the change in sasa
+    :hbond_sasaE: Calculate the change in sasa energy for hbonds
+    :dHbond_unsat: Calculate the number of unsat hbonds
+    :jump_sel: The specific jump of our interface
+    :prefix_scorefile: The prefix of the score headers in our scorefile
+
+    RETURNS
+    -------
+    All filters specified will be applied to our poses scorefile.
+    """
+    # init our interfaceAnalyzer filter
+    interfaceAnalyzer = protocols.analysis.InterfaceAnalyzerMover()
+    # set our scorefunction
+    interfaceAnalyzer.set_scorefunction(scorefxn)
+    interfaceAnalyzer.set_pack_separated(pack_separated)
+    interfaceAnalyzer.set_interface_jump(jump_sel)
+    interfaceAnalyzer.set_calc_dSASA(dSASA)
+    interfaceAnalyzer.set_calc_hbond_sasaE(hbond_sasaE)
+    interfaceAnalyzer.set_compute_interface_delta_hbond_unsat(dHbond_unsat)
+    interfaceAnalyzer.set_compute_interface_energy(interface_energy)
+    interfaceAnalyzer.set_compute_interface_sc(interface_shapecomp)
+    interfaceAnalyzer.set_compute_packstat(packstat)
+    interfaceAnalyzer.set_compute_separated_sasa(sasa_separated)
+    interfaceAnalyzer.set_pack_input(pack_before_separate)
+    interfaceAnalyzer.set_pack_rounds(pack_rounds)
+    interfaceAnalyzer.set_scorefile_reporting_prefix(prefix_scorefile)
+
+
+    # Apply and add all score outputs to our pose
+    interfaceAnalyzer.apply(currpose)
+    interfaceAnalyzer.add_score_info_to_pose(currpose)
+    return 0
