@@ -146,7 +146,7 @@ def shapeComp(
     sc.set_jump_selector(jump_sel)
     sc.filtered_sc(0.5)
     sc.write_int_area(True)
-    sc_score = sc.compute(currpose)
+    sc_score = sc.score(currpose)
     currpose.scores[filtername] = sc_score
     return sc_score
 
@@ -190,7 +190,8 @@ def count_nonpolar_interactions(
     # Extract count
     non_polar_count = interfaceHydrophobic.score(currpose)
     # return the bool, but also cash to our pose score
-    return interfaceHydrophobic.apply(currpose), non_polar_count
+    non_polar_bool = interfaceHydrophobic.apply(currpose)
+    return non_polar_bool, non_polar_count
 
 
 def count_polar_interactions(
@@ -220,9 +221,6 @@ def count_polar_interactions(
     hbondMetric.set_residue_selector2(interfaceB)
     # Apply it, it will get stashed in our pose's score
     hbondMetric.apply(currpose, prefix=filtername_prefix)
-    score = hbondMetric.calculate(currpose)
-    print(score)
-    currpose.scores[filtername_prefix] = score
     return 0
 
 def grab_name3_sequence(
