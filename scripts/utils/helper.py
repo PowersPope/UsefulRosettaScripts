@@ -25,6 +25,8 @@ from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 
 # python imports
 import os
+import portalocker
+import time
 from typing import Union, List, Tuple
 
 
@@ -56,6 +58,72 @@ class SilentFileWrite:
                 self.opts, pose, structName,
                 )
         self.silentFile.add_structure(struct)
+        return 0
+
+    def acquire_lock(self, file: str, wait_time = 1):
+        """Continuosly check to see that our file is not locked, return file when unlocked,
+        but not lock it, so another process cannot write to it currently
+
+        PARAMS
+        ------
+
+        RETURNS
+        -------
+        Our unlocked file handle
+        """
+        lock_fh = open(file, 'a')
+        while True:
+            try:
+                # Lock our file
+                portalocker.lock(lock_fh, portalocker.LOCK_EX | portalocker.LOCK_NB)
+                return lock_fh
+            except portalocker.LockException:
+                time.sleep(wait_time)
+
+    def release_lock(self, lock_fh):
+        """Release the current lock on our file handle, as our process is done
+
+        PARAMS
+        ------
+        :lock_fh: Our locked file handler
+
+        RETURNS
+        -------
+        """
+        portalocker.unlock(lock_fh)
+        lock_fh.close()
+
+    def write_when_not_busy(
+            self,
+            pose: core.pose.Pose,
+            structName: str,
+            ) -> int:
+        """This is a control flow function, to make sure we are not overwritting entries when
+        running distributed tasks
+
+
+        PARAMS
+        ------
+        :pose: A filled final pose
+        :structName: The name of our struct
+
+        RETURNS
+        -------
+        True when the file is free, else it waits until it is done by checking after sleeping
+        """
+        # grab our locked fh
+        lock_fh = self.acquire_lock(self.outname)
+
+        # now try to check
+        try:
+            # Load in our SilentFile or create our data
+            if os.path.exists(self.outname):
+                self.silentFile = silent.SilentFileData(self.outname, False, False, "binary", self.opts)
+
+            # Add new structure 
+            self.generate_plus_write_to_silentfile(pose, structName)
+        finally:
+            self.release_lock(lock_fh)
         return 0
 
     def generate_plus_write_to_silentfile(
