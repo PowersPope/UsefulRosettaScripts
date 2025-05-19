@@ -111,19 +111,23 @@ class SilentFileWrite:
         -------
         True when the file is free, else it waits until it is done by checking after sleeping
         """
+        already_exists = False
         # grab our locked fh
-        lock_fh = self.acquire_lock(self.outname)
+        if os.path.exists(self.outname):
+            lock_fh = self.acquire_lock(self.outname)
+            already_exists = True
 
-        # now try to check
+#         # now try to check
         try:
-            # Load in our SilentFile or create our data
-            if os.path.exists(self.outname):
-                self.silentFile = silent.SilentFileData(self.outname, False, False, "binary", self.opts)
+#             # Load in our SilentFile or create our data
+#             if os.path.exists(self.outname):
+#                 self.silentFile = silent.SilentFileData(self.outname, True, True, "binary", self.opts)
 
             # Add new structure 
             self.generate_plus_write_to_silentfile(pose, structName)
         finally:
-            self.release_lock(lock_fh)
+            if already_exists:
+                self.release_lock(lock_fh)
         return 0
 
     def generate_plus_write_to_silentfile(
