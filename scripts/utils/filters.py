@@ -186,9 +186,10 @@ def count_nonpolar_interactions(
             apolar_res = apolar_res,
             )
     # name our filter
-    interfaceHydrophobic.set_user_defined_name(filtername)
+#     interfaceHydrophobic.set_user_defined_name(filtername)
     # Extract count
     non_polar_count = interfaceHydrophobic.score(currpose)
+    currpose.scores[filtername] = non_polar_count
     # return the bool, but also cash to our pose score
     non_polar_bool = interfaceHydrophobic.apply(currpose)
     return non_polar_bool, non_polar_count
