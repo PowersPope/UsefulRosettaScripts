@@ -78,7 +78,7 @@ def silentfile_process(sf: SilentFilePoseInputStream, args,
         
         # Final if there is oversat write to our filtered silentfile
         if oversat:
-            outsf.generate_plus_add_structure(pose, pose.pdb_info().name())
+            outsf.generate_plus_add_structure(pose, core.pose.extract_tag_from_pose(pose))
             n+=1
 
     # Write all of the structs to a file
