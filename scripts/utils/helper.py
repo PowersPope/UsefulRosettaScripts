@@ -457,6 +457,7 @@ def grab_atomid_map(
         pose_target: core.pose.Pose,
         residue_anchors: List[int],
         target_start_resi: int = 2,
+        ref_chain: int = 2,
         ) -> map_core_id_AtomID_core_id_AtomID:
     """Build an AtomID map for superimpose_pose call to function
 
@@ -477,9 +478,19 @@ def grab_atomid_map(
 
     # loop through our residues
     for ir in range(0, len(residue_anchors)):
+        # check if our resiude is the final or first residue, then remove terminal ends if so
+        print(ir)
+        print(residue_anchors[0])
+        print(ir+residue_anchors[0])
+        if pose_reference.size() == residue_anchors[0]:
+            remove_term_variants(
+                pose_reference, pose_reference.chain_begin(ref_chain),
+                pose_reference.chain_end(ref_chain),
+            )
         # Grab the residues
         fzn_posit = ir+target_start_resi
         nat_fzn_posit = ir+residue_anchors[0]
+        print(nat_fzn_posit)
         curres = pose_target.residue(fzn_posit)
         refres = pose_reference.residue(nat_fzn_posit)
 
