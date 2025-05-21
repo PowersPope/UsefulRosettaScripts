@@ -164,7 +164,7 @@ if __name__ == "__main__":
     args = p.parse_args()
 
     # Setup our initial Rosetta instance with our presets
-    init(extra_options="-mute all -out:file:silent_struct_type binary -ex1 -ex2aro -score:weights ref2015_cart")
+    init(extra_options="-mute all -in:file:fullatom true -out:file:silent_struct_type binary -ex1 -ex2aro -score:weights ref2015_cart")
 
     # Setup our silentfile
     outSilentFile = helpfunc.SilentFileWrite(outname=os.path.join(args.outpath,args.silentoutname))
