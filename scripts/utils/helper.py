@@ -117,17 +117,11 @@ class SilentFileWrite:
             lock_fh = self.acquire_lock(self.outname)
             already_exists = True
 
-#         # now try to check
-        try:
-#             # Load in our SilentFile or create our data
-#             if os.path.exists(self.outname):
-#                 self.silentFile = silent.SilentFileData(self.outname, True, True, "binary", self.opts)
+        # write output
+        self.generate_plus_write_to_silentfile(pose, structName)
 
-            # Add new structure 
-            self.generate_plus_write_to_silentfile(pose, structName)
-        finally:
-            if already_exists:
-                self.release_lock(lock_fh)
+        if already_exists:
+            self.release_lock(lock_fh)
         return 0
 
     def generate_plus_write_to_silentfile(
@@ -552,6 +546,8 @@ def place_peptide_incontext(
             )
 
     pose_target.update_residue_neighbors()
+
+    core.pose.renumber_pdbinfo_based_on_conf_chains(pose_target)
     # This added because disulfides werent detected and found here:
     # https://forum.rosettacommons.org/node/3932
     pose_target.conformation().detect_disulfides()
