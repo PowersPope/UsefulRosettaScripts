@@ -78,7 +78,12 @@ def silentfile_process(sf: SilentFilePoseInputStream, args,
         
         # Final if there is oversat write to our filtered silentfile
         if oversat:
-            outsf.generate_plus_add_structure(pose, core.pose.extract_tag_from_pose(pose))
+            if args.pdb_output:
+                pose.dump_pdb(
+                        os.path.join(args.outpath, "filtered_"+core.pose.extract_tag_from_pose(pose)),
+                        )
+            else:
+                outsf.generate_plus_add_structure(pose, core.pose.extract_tag_from_pose(pose))
             n+=1
 
     # Write all of the structs to a file
@@ -103,6 +108,9 @@ def pdb_process(pdb_list: list[str], args,
     -------
     iters and processes the outputs based on our filter workflow
     """
+    # num track
+    n = 0
+
     # Loop through files and run our script through
     for f in pdb_list:
         pose = io.pose_from_pdb(f)
@@ -119,7 +127,7 @@ def pdb_process(pdb_list: list[str], args,
                     "bb_hbonds",
                     )
         # Skip this input if it doesnt meet our criteria
-        if bb_hbonds < args.bb_hbonds_cutoff:
+        if bb_hbonds < args.bb_hbond_cutoff:
             continue
 
         # Check the score of our pose
@@ -143,10 +151,21 @@ def pdb_process(pdb_list: list[str], args,
         
         # Final if there is oversat write to our filtered silentfile
         if oversat:
-            outsf.generate_plus_add_structure(pose, pose.pdb_info().name())
+            if args.pdb_output:
+                pose.dump_pdb(
+                        os.path.join(args.outpath, "filtered_"+pose.pdb_info().name().split('/')[-1]),
+                        )
+            else:
+                outsf.generate_plus_add_structure(pose, pose.pdb_info().name())
+
+
+            n+=1
 
     # Write all of the structs to a file
-    outsf.write_all()
+    print(n, "Structs passed the filtering process")
+
+    if not args.pdb_output:
+        outsf.write_all()
 
     return 0
 
@@ -161,13 +180,17 @@ if __name__ == "__main__":
     p.add_argument("--peptide-chain", type=int, default=1, help="Which chain is our peptide? Needed for Oversat Filter")
     p.add_argument("--bb-hbond-cutoff", type=int, default=2, help="Desired minimum bb-bb hbonbds")
     p.add_argument("--score-cutoff", type=float, default=0.0, help="Desired maximum Rosetta score")
+    p.add_argument("--pdb-output", action="store_true", help="Write out PDBs instead of a silentfile")
     args = p.parse_args()
 
     # Setup our initial Rosetta instance with our presets
     init(extra_options="-mute all -in:file:fullatom true -out:file:silent_struct_type binary -ex1 -ex2aro -score:weights ref2015_cart")
 
     # Setup our silentfile
-    outSilentFile = helpfunc.SilentFileWrite(outname=os.path.join(args.outpath,args.silentoutname))
+    if not args.pdb_output:
+        outSilentFile = helpfunc.SilentFileWrite(outname=os.path.join(args.outpath,args.silentoutname))
+    else:
+        outSilentFile = None
 
     # setup our scorefxn
     scorefxn = helpfunc.init_scorefunction()
