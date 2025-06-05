@@ -14,9 +14,14 @@ if __name__ == "__main__":
     p.add_argument("--input-file", type=str, help="A csv file that has file name and description tag")
     p.add_argument("--silentfile-dir", type=str, help="Path to where silentfiles are housed")
     p.add_argument("--outfile-dir", type=str, help="Path to dump pdbs")
+    p.add_argument("--single-input", action="store_true", help="Specify if only passing a csv with one silentfile")
     args = p.parse_args()
 
     init(extra_options="-in:file:fullatom")
+
+    # Make the outdir if it doesnt exist yet.
+    if not os.path.exists(args.outfile_dir):
+        os.makedirs(args.outfile_dir)
 
     # store our output
     df = pd.read_csv(args.input_file)
@@ -30,11 +35,18 @@ if __name__ == "__main__":
         tag = out.tag
 
         # Setup the silentFile output
-        opts = silent.SilentFileOptions()
-        opts.in_fullatom(True)
-        opts.set_binary_output(True)
-        silentfile = silent.SilentFileData(opts)
-        silentfile._read_file(os.path.join(args.silentfile_dir, file+".silent"))
+        if row == 0 and args.single_input:
+            opts = silent.SilentFileOptions()
+            opts.in_fullatom(True)
+            opts.set_binary_output(True)
+            silentfile = silent.SilentFileData(opts)
+            silentfile._read_file(os.path.join(args.silentfile_dir, file+".silent"))
+        elif not args.single_input:
+            opts = silent.SilentFileOptions()
+            opts.in_fullatom(True)
+            opts.set_binary_output(True)
+            silentfile = silent.SilentFileData(opts)
+            silentfile._read_file(os.path.join(args.silentfile_dir, file+".silent"))
 
         # grab the structure
         struct = silentfile.get_structure(tag)
