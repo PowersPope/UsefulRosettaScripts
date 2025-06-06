@@ -771,7 +771,8 @@ def design_peptide(
         mmf: MoveMapFactory,
         scorefxn: ScoreFunction,
         cartesian: bool = False,
-        script: str = "monomer",
+        repeats: int = 5,
+        # script: str = "monomer",
         ) -> int:
     """Design our macrocycle pose, in the context of the target.
     TaskFactory and MoveMapFactory are alrady specified before this.
@@ -790,7 +791,8 @@ def design_peptide(
     Our inplace designed + relaxed pose
     """
     # init our design mover
-    designMover = FastDesign(scorefxn_in = scorefxn, script_file="MonomerDesign2019" if script == "monomer" else "InterfaceDesign2019")
+    # designMover = FastDesign(scorefxn_in = scorefxn, script_file="MonomerDesign2019" if script == "monomer" else "InterfaceDesign2019")
+    designMover = FastDesign(scorefxn_in = scorefxn, standard_repeats = repeats)
     # Set Cartesian non-ideal minimization
     designMover.cartesian(cartesian)
     # Set the minimize method
@@ -816,7 +818,8 @@ def relax_selection(
         currpose: core.pose.Pose,
         res_selection: rs,
         scorefxn: ScoreFunction,
-        script: str = "monomer",
+        # script: str = "monomer",
+        repeats: int = 5,
         cartesian: bool = False,
         ) -> int:
     """Complex relaxation for the specific areas
@@ -843,9 +846,13 @@ def relax_selection(
             )
 
     # Now set up our FastRelax Mover
-    fr = protocols.relax.FastRelax(scorefxn_in = scorefxn, script_file = "MonomerDesign2019" if script == "monomer" else "InterfaceDesign2019")
+    # fr = protocols.relax.FastRelax(scorefxn_in = scorefxn, script_file = "MonomerDesign2019" if script == "monomer" else "InterfaceDesign2019")
+    fr = protocols.relax.FastRelax(scorefxn_in = scorefxn, standard_repeats = repeats)
     fr.set_movemap_factory(mmf)
     fr.set_enable_design(False)
+    fr.cartesian(cartesian)
+    if cartesian:
+        fr.max_iter(200)
 
     # Now apply our relax to the pose
     fr.apply(currpose)

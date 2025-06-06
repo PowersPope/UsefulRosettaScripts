@@ -18,6 +18,29 @@ from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 from typing import Tuple, Union
 
 # Functions
+def score_selection(
+    refpose: core.pose.Pose,
+    cursel: ResidueSelector,
+    scorefxn: ScoreFunction,
+    ) -> float:
+    """Score the specific selection passed within our pose, and return that score value
+
+    PARAMS
+    ------
+    :refpose: Our filled pose
+    :cursel: The selection that is within our pose
+    :scorefxn: the scorefunction that is used to generate our score
+
+    RETURNS
+    -------
+    :score: The current score
+    """
+    # get the vector1 bool
+    sel_vector1 = cursel.apply(refpose)
+    # Now compute the score
+    score = scorefxn.get_sub_score(refpose, sel_vector1)
+    return score
+
 def compare_rmsd_pose(
         refpose: core.pose.Pose,
         currpose: core.pose.Pose,
