@@ -858,10 +858,43 @@ def relax_selection(
     fr.apply(currpose)
     return 0
 
+def generate_clean_conf(
+        curpose: core.pose.Pose,
+        keep_selection: ResidueSelector,
+        ) -> core.pose.Pose:
+    """Generate a new pose, where we keep our selection and remove everything else.
+    The constraints are removed and the pose is stored in a new pose
+
+    PARAMS
+    ------
+    :curpose: The current filled full pose
+    :keep_selection: The selection that we would like to keep and not get rid of
+
+    RETURNS
+    -------
+    :wpose2: The pose with only our selection and no constraints
+    """
+    # First we make a copy of our pose and remove consstraints
+    wpose = core.pose.Pose()
+    wpose.detached_copy(curpose)
+    wpose.remove_constraints()
+
+    # Remove the portion of the pose that is not the keep_selection
+    deleter = protocols.grafting.simple_movers.DeleteRegionMover()
+    query_not = rs.NotResidueSelector(keep_selection)
+    deleter.set_residue_selector(query_not)
+    deleter.apply(wpose)
+
+    # Generate a new empty pose and fill with a pointer to our wpose
+    wpose2 = core.pose.Pose()
+    wpose2.get_new_conformation( wpose.conformation_ptr() )
+    wpose2.conformation().detect_disulfides()
+    return wpose2
+
 
 def relax_sidechains(
         pose: core.pose.Pose,
-        res_selection: rs,
+        res_selection: ResidueSelector,
         scorefxn: ScoreFunction,
         script: str = "monomer",
         ) -> int:
