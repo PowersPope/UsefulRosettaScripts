@@ -887,7 +887,7 @@ def generate_clean_conf(
 
     # Generate a new empty pose and fill with a pointer to our wpose
     wpose2 = core.pose.Pose()
-    wpose2.get_new_conformation( wpose.conformation_ptr() )
+    wpose2.set_new_conformation( wpose.conformation_ptr() )
     wpose2.conformation().detect_disulfides()
     return wpose2
 
