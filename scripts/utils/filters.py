@@ -46,6 +46,7 @@ def compare_rmsd_pose(
         currpose: core.pose.Pose,
         refsel: ResidueSelector,
         cursel: ResidueSelector,
+        superimpose: bool = False,
         filtername: str = "relax_after_design_",
         ) -> float:
     """Generate a RMSD metric with all bb heavy atoms including O
@@ -56,6 +57,7 @@ def compare_rmsd_pose(
     :currpose: The current pose you want to compare
     :refsel: the selection in the reference
     :curesel: the selection in the current pose
+    :superimpose: True run superimpose before calc, False dont
     :filtername: The name of our filter that will show up in the score file
 
     RETURNS
@@ -70,6 +72,7 @@ def compare_rmsd_pose(
     rmsdMetric.set_rmsd_type(
             core.scoring.rmsd_atoms.rmsd_protein_bb_heavy_including_O
                              )
+    rmsdMetric.set_run_superimpose(superimpose)
 
     # apply the filter
     rmsdMetric.apply(currpose, filtername)
