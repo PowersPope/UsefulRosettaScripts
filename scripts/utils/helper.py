@@ -10,6 +10,7 @@ import pyrosetta.rosetta as rosetta
 import pyrosetta.rosetta.core as core
 import pyrosetta.rosetta.core.select.residue_selector as rs
 import pyrosetta.rosetta.protocols.simple_moves as sm
+import pyrosetta.rosetta.protocols.generalized_kinematic_closure as genkic
 import pyrosetta.rosetta.protocols as protocols
 import pyrosetta.rosetta.core.pack.task.operation as opt
 from pyrosetta.rosetta.core.pack.task.operation import TaskOperation
@@ -27,6 +28,7 @@ from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 import os
 import portalocker
 import time
+import random
 from typing import Union, List, Tuple
 
 
@@ -680,6 +682,7 @@ def mutate_residue(
 def search_proline_mutate(
         pose: core.pose.Pose,
         residue_selection: rs,
+        scorefxn: ScoreFunction,
         number_prolines: int = 1,
         ) -> Tuple[bool, List[int]]:
     """Search the rama of residues that could be a proline
@@ -691,16 +694,19 @@ def search_proline_mutate(
     ------
     :pose: Our filled pose object
     :residue_selection: The residues we would like to scan
+    :scorefxn: A way of determining our best mutated position
     :number_prolines: The number of desired prolines at the end
 
     RETURNS
     -------
     True/False: whether we were able to satifisy our number_prolines criteria
         or not
+    :proline_positions: The position of our proline
     """
     # init our count
     mutated_prolines = 0
     proline_positions = list()
+    base_score = scorefxn(pose)
 
     # grab the proline positions
     dpro_selector = rs.BinSelector()
@@ -725,7 +731,6 @@ def search_proline_mutate(
     specific_prolines.add_residue_selector(specific_lprolines)
     specific_prolines.add_residue_selector(specific_dprolines)
 
-
     # Get the resi numbers for looping
     specific_proline_resi = core.select.get_residues_from_subset(specific_prolines.apply(pose))
 
@@ -734,12 +739,36 @@ def search_proline_mutate(
         assert specific_proline_resi == {}, f"proline resi are not empty. There is a bug: {len(specific_proline_resi)}"
         return (False, proline_positions)
 
-    for ir in specific_proline_resi:
-        if not hydrogen_bond_check(pose, ir):
-            mutate_residue(pose, ir, "PRO")
-            mutated_prolines+=1
-            proline_positions.append(ir)
-            if mutated_prolines == number_prolines: return (True, proline_positions)
+
+    # Multi Proline search, but this does not take into account the energy yet.
+    if number_prolines >  1:
+        print("Energy is not being taken into account, and simply placing prolines is being done now....")
+        for ir in specific_proline_resi:
+            if not hydrogen_bond_check(pose, ir):
+                mutate_residue(pose, ir, "PRO")
+                # This is important if we didnt have a energy check
+                mutated_prolines+=1
+                proline_positions.append(ir)
+                if mutated_prolines == number_prolines: return (True, proline_positions)
+
+    # Single proline placement, this searches for the best proline placement
+    else:
+        for ir in specific_proline_resi:
+            if not hydrogen_bond_check(pose, ir):
+                pose_clone = pose.clone()
+                mutate_residue(pose_clone, ir, "PRO")
+                mutated_prolines+=1
+                new_score = scorefxn(pose_clone)
+                print("New Proline Check: %i with a new score of %.3f. Compared against a base score of %.3f" % (ir, new_score, base_score))
+                if new_score < base_score:
+                    base_score = new_score
+                    low_position = ir
+                pose_clone.clear()
+        # We have searched and now will output the lowest score proline position
+        if mutated_prolines > 0:
+            mutate_residue(pose, low_position, "PRO")
+            proline_positions.append(low_position)
+            return (True, proline_positions)
     # If we get to here, then we did not mutate enough positions to meet our criteria therefore the filter fails.
     # However, our pose was still possibly mutated if you have more then 1 desired proline. (keep in mind)
     return (False, proline_positions)
@@ -816,7 +845,7 @@ def design_peptide(
 
 def relax_selection(
         currpose: core.pose.Pose,
-        res_selection: rs,
+        res_selection: ResidueSelector,
         scorefxn: ScoreFunction,
         # script: str = "monomer",
         repeats: int = 5,
@@ -858,10 +887,52 @@ def relax_selection(
     fr.apply(currpose)
     return 0
 
+def small_backbone_perturbations(
+        curpose: core.pose.Pose,
+        res_sel: ResidueSelector,
+        n_moves: int = 100,
+        temp: float = 1.0,
+        angle_max: float = 10.0,
+    ) -> int:
+    """Applies a small perturbation to the phi/psi angles of the selection backbone. This can
+    be used to develop diverse random backbone conformations. Trying to see if this would be helpful
+    for scoring a peptide when it is alone and checking that our base conformation has the lowest score
+
+    PARAMS
+    ------
+    :curpose: Filled pose
+    :res_sel: Selection
+    :n_moves: Number of MC moves for the mover to pertrub res_i randomly selected
+    :temp: MC temp
+    :angle_max: The maximum distance allowed for perturbation
+
+    RETURNS
+    -------
+    :perturb_pose: Our new conformation
+    """
+    # Specify our movemap (for small mover)
+    mm = core.kinematics.MoveMap()
+    mm.set_bb(True)
+    mm.set_chi(True)
+
+    # Setup our mover
+    small = protocols.simple_moves.SmallMover(
+        mm,
+        temp,
+        n_moves,
+    )
+    small.angle_max(angle_max)
+    small.set_residue_selector(res_sel)
+    small.setup_list(curpose)
+    small.apply(curpose)
+    return 0
+
 def generate_clean_conf(
         curpose: core.pose.Pose,
         keep_selection: ResidueSelector,
-        ) -> core.pose.Pose:
+        scorefxn: ScoreFunction,
+        disulfides: bool = False,
+        ) -> Tuple[float, core.pose.Pose]:
     """Generate a new pose, where we keep our selection and remove everything else.
     The constraints are removed and the pose is stored in a new pose
 
@@ -869,10 +940,13 @@ def generate_clean_conf(
     ------
     :curpose: The current filled full pose
     :keep_selection: The selection that we would like to keep and not get rid of
+    :scorefxn: Scorefunction used for scoring the clean conf
+    :disulfides: Re-detect disulfides within selection
 
     RETURNS
     -------
-    :wpose2: The pose with only our selection and no constraints
+    :score: float value representing the energetic value of our selection using scorefxn
+    :wpose: A pose of our selection
     """
     # First we make a copy of our pose and remove consstraints
     wpose = core.pose.Pose()
@@ -889,7 +963,10 @@ def generate_clean_conf(
     wpose2 = core.pose.Pose()
     wpose2.set_new_conformation( wpose.conformation_ptr() )
     wpose2.conformation().detect_disulfides()
-    return wpose2
+
+    # Score the output
+    score = scorefxn(wpose2)
+    return score, wpose2
 
 
 def relax_sidechains(
@@ -918,7 +995,6 @@ def relax_sidechains(
     fr = protocols.relax.FastRelax(scorefxn_in = scorefxn, script_file = "MonomerDesign2019" if script == "monomer" else "InterfaceDesign2019")
     fr.set_movemap_factory(mmf)
     fr.set_enable_design(False)
-#     fr.set_scorefxn(scorefxn)
 
     # Now apply our relax to the pose
     fr.apply(pose)
@@ -955,4 +1031,173 @@ def init_scorefunction(default: bool=False,) -> ScoreFunction:
     emopts.hbond_options().decompose_bb_hb_into_pair_energies(True)
     scorefxn.set_energy_method_options(emopts)
     return scorefxn
+
+def residues_to_perturb(peptide_length: int, root: int) -> List[int]:
+    """
+    Determine which residues should be perturbed, based on macrocycle size
+
+    PARAMS
+    ------
+    :peptide_length: Amount of amino acids in our peptide
+    :root: The root residue idx
+
+    RETURNS
+    -------
+    :perturb_residues: A list of residues that are not pivots
+    :pivote_res: A list of pivot residues
+    """
+    # init our output
+    perturb_residues = []
+    pivot_res = []
+    # loop through our residues and get rid of +1, -1 from root
+    for ir in range(1, peptide_length+1):
+        if (ir != root+1) and (ir != root-1) and (ir != root) and (ir != peptide_length):
+            perturb_residues.append(ir)
+        elif ir != root:
+            pivot_res.append(ir)
+    # Fix Pivot RES order
+    while pivot_res[0] < root:
+        pre = pivot_res.pop(0)
+        pivot_res.append(pre)
+    return perturb_residues, pivot_res
+
+def get_nonroot_residues(peptide_length: int, root: int, exclude_residues: List[int]|None = None) -> List[int]:
+    """
+    Grab the residue indexes in the order that they need to be in for GenKIC as in
+    from root -> peptide_length -> 1 -> root (where root is excluded)
+
+    PARAMS
+    ------
+    :peptide_length: Amount of amino acids in our peptide
+    :root: The root residue idx
+
+    RETURNS
+    -------
+    :non_root: A list of residues that are not the root residue. Also,
+        in the order that needs to be specified for genkic
+    """
+    # init list
+    non_root = [i for i in range(root+1, peptide_length+1)] # post root
+    pre_root = [i for i in range(1, root)]
+    non_root.extend(pre_root)
+
+    return non_root
+
+def foldtree_define(N: int) -> int:
+    """
+    Define what the root of our fold tree is
+
+    PARAMS
+    ------
+    :N (int): Desired size of input structure
+
+    RETURNS
+    -------
+    :root (int): The root residue index (zero indexed)
+    """
+    if N % 2 == 0:
+        return int(N/2)
+    else:
+        return int((N-1)/2)
+
+def anchor_randomizebyrama(
+    anchor_resi: int,
+                           ) -> protocols.backbone_moves.RandomizeBBByRamaPrePro:
+    """
+    Generate randomize Anchor position by Rama Prepro Mover, since GenKIC does not alter
+    it by default
+
+    PARAMS
+    ------
+    :anchor_resi: The residue index position of our anchor (1-indexing)
+
+    RETURNS
+    ------
+    Returns the initialized RandomBB Mover
+    """
+    randomizeBB = protocols.backbone_moves.RandomizeBBByRamaPrePro()
+    randomizeBB.set_residue_selector(
+        rs.ResidueIndexSelector(anchor_resi)
+    )
+    return randomizeBB.clone()
+
+def apply_genkic(pose: core.pose.Pose,
+                 scorefxn: ScoreFunction,
+                 randomize_root: bool = False,
+                 DEBUG: bool = False,
+                 ) -> core.pose.Pose:
+    """
+    Apply the generalized kinematic loop closure to a pose. This will designate the appropriate
+    size genkic to apply
+
+    PARAMS
+    ------
+    :pose: Our input glycine pose that has been set up
+    :scorefxn: Scorefunction to use for checking our output
+    :randomize_root: This is for only insolution generation and not design or when you have anchors
+    :DEBUG: Adds some TRACE outputs
+
+    RETURNS
+    -------
+    :genkic_pose: A stochastically sampled backbone given sequence RAMA preferences
+    """
+    # Get the length of our pose
+    pep_len = pose.total_residue()
+    root = foldtree_define(pep_len)
+
+    # Calculate which residues to perturb and set as pivots
+    free_residues, pivot_res = residues_to_perturb(pep_len, root)
+
+    # Calculate residues to include in GenKIC
+    non_root_residues = get_nonroot_residues(pep_len, root)
+    # init the genkic class object
+    GenKIC = genkic.GeneralizedKIC()
+    GenKIC.set_closure_attempts(500)
+    GenKIC.set_min_solution_count(1)
+    GenKIC.set_selector_type("lowest_energy_selector")
+    GenKIC.set_selector_scorefunction(scorefxn)
+    # Add bb randomization for Anchor (rama prepro) if doing selection
+    if randomize_root:
+        if DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS IS ONLY DONE FOR IN SOLUTION GENERATION)")
+        randomizeBB = anchor_randomizebyrama(root)
+        GenKIC.set_preselection_mover(randomizeBB)
+    for ir in non_root_residues:
+        GenKIC.add_loop_residue(ir)
+    GenKIC.close_bond(
+        rsd1 = pose.total_residue(),
+        at1 = "C",
+        rsd2 = 1,
+        at2 = "N",
+        bondlength = 1.32,
+        bondangle1 = 114.,
+        bondangle2 = 123.,
+        torsion = 180.,
+        rsd1_before = 0,
+        at1_before = "",
+        rsd2_after = 0,
+        at2_after = "",
+        randomize_this_torsion = False,
+        randomize_flanking_torsions = False,
+    )
+    GenKIC.set_pivot_atoms(
+        rsd1 = pivot_res[0],
+        at1 = "CA",
+        rsd2 = pivot_res[1],
+        at2 = "CA",
+        rsd3 = pivot_res[2],
+        at3 = "CA",
+    )
+    GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_alpha_backbone_by_rama)
+    GenKIC.set_perturber_custom_rama_table("flat_symm_dl_aa_ramatable")
+    for ir in free_residues:
+        GenKIC.add_residue_to_perturber_residue_list(ir)
+    GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
+    for ir in non_root_residues:
+        GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
+        GenKIC.set_filter_resnum(ir)
+        GenKIC.set_filter_rama_cutoff_energy(2)
+
+    GenKIC.apply(pose)
+
+    return pose.clone()
 
