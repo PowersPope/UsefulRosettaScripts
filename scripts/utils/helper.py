@@ -1148,7 +1148,7 @@ def apply_genkic(pose: core.pose.Pose,
     non_root_residues = get_nonroot_residues(pep_len, root)
     # init the genkic class object
     GenKIC = genkic.GeneralizedKIC()
-    GenKIC.set_closure_attempts(500)
+    GenKIC.set_closure_attempts(500) # changed from 500
     GenKIC.set_min_solution_count(1)
     GenKIC.set_selector_type("lowest_energy_selector")
     GenKIC.set_selector_scorefunction(scorefxn)
@@ -1196,4 +1196,122 @@ def apply_genkic(pose: core.pose.Pose,
     GenKIC.apply(pose)
 
     return pose.clone()
+
+def build_unbiased_pose(
+        pose: core.pose.Pose,
+        ) -> core.pose.Pose:
+    """Take a sequence and build an unbiased ring with no conformation
+    information. This is useful for applying GenKIC unbiasedly.
+
+    PARAMS
+    ------
+    :pose: The pose with the sequence we want to repeat
+
+    RETURNS
+    -------
+    :new_pose: Our new identical seq pose, but no conformational information
+    """
+    # Generate an empty pose and stubmover
+    new_pose = core.pose.Pose()
+    stub_mover = protocols.cyclic_peptide.PeptideStubMover()
+    stub_mover.set_reset_mode(true)
+    stubmover.reset_mover_data()
+
+    # Thread the amino acids onto our pose
+    for ir in range(1, pose.total_residue()+1):
+        # grab the three residue 
+        stub_mover.add_residue(
+                stubmode ="Append",
+                resname = pose.residue(ir).name3(),
+                position = 0,
+                jumpmode = False,
+                connecting_atom = "",
+                repeat = 1,
+                anchor_rsd = 0, 
+                anchor_rsd_selector = None,
+                anchor_atom = "",
+                )
+
+    # apply this to our empty pose
+    stub_mover.apply(new_pose)
+    return new_pose
+
+
+def simple_cycpep_predict_proxy(
+        pose: core.pose.Pose,
+        scorefxn: ScoreFunction,
+        randomize_root: bool = False,
+        N: int = 100,
+        DEBUG: bool = False,
+        ) -> bool:
+    """Run a simple_cycpep_predict proxy for N rounds, to see if a cyclic
+    peptide is stable. This wont determine if a peptide is actually stable, but will possibly give you a quick way of determining if something is worth folding.
+    We are assuming that the peptide has been minimized before this function.
+
+    PARAMS
+    ------
+    :pose: Our input glycine pose that has been set up
+    :scorefxn: Scorefunction to use for checking our output
+    :randomize_root: This is for only insolution generation and not design 
+        or when you have anchors
+    :N: The number of rounds to run GenKIC, basically the number of decoys /
+        conformations you want to test against the design.
+    :DEBUG: Adds some TRACE outputs
+
+    RETURNS
+    -------
+    :is_stable: True if no conformations were found to be lower energy then
+            design, False if a conformation was found.
+    """
+    # init our out variable
+    is_stable = False
+
+    # score input
+    init_score = scorefxn(pose)
+
+    # loop through genkic outputs
+    for nstruct in range(1, N+1):
+        # Make a clean un biased pose that can have genkic applied to it
+        clean_pose = build_unbiased_pose(pose)
+
+        # Generate conformation and relax
+        genkic_out = apply_genkic(
+                pose = clean_pose,
+                scorefxn = scorefxn,
+                randomize_root = True,
+                )
+        relax_selection(
+                currpose = genkic_out,
+                res_selection = rs.TrueResidueSelector(),
+                scorefxn = scorefxn,
+                cartesian = args.cartesian,
+                )
+
+        # Score our output and check the RMSD change
+        genkic_score = scorefxn(genkic_out)
+        rmsd_genkic_to_design = filterfuncs.compare_rmsd_pose(
+                pose,
+                genkic_out,
+                rs.TrueResidueSelector(),
+                rs.TrueResidueSelector(),
+                True,
+                "test_%i_rmsd" % nstruct,
+                )
+
+        # Now check to see our design is stable
+        print("RMSD Dif: %.4f , Init Score: %.4f GenKIC Score: %.4f" % (
+            rmsd_genkic_to_design, init_score, genkic_score,
+            ))
+        low_rmsd_and_low_score = (
+                (genkic_score <= init_score+2) and 
+                (rmsd_genkic_to_design <= 0.6)
+                )
+        if genkic_score < init_score or low_rmsd_and_low_score:
+            print("Found a lower energy conformation, skipping this design...")
+            is_stable = False
+            break
+
+    if is_stable:
+        print("Possibly stable! Good Design")
+    return is_stable
 
