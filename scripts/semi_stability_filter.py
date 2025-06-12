@@ -185,43 +185,14 @@ def main():
                 continue
 
             # lets test our conformation perturber
-            selection_pose_clone = selection_pose.clone()
-            is_stable = True
             time_start = time.time()
-            for n in range(100):
-                genkic_out = helpfuncs.apply_genkic(
-                        pose = selection_pose_clone,
-                        scorefxn = scorefxn,
-                        randomize_root = True,
-                        )
-                helpfuncs.relax_selection(
-                        currpose = genkic_out,
-                        res_selection = sel.TrueResidueSelector(),
-                        scorefxn = scorefxn,
-                        cartesian = args.cartesian,
-                        )
-                bb_score = scorefxn(genkic_out)        
-
-                # RMSD check 
-                rmsd_small = filterfuncs.compare_rmsd_pose(
-                        selection_pose, 
-                        genkic_out,
-                        peptide_sel,
-                        peptide_sel,
-                        True,
-                        "test_%i_rmsd" % n
-                        )
-                print("RMSD Change %.4f for struct %i" % (rmsd_small, n))
-                print("Relax Score: %.4f and GenKIC Score: %.4f" % (relax_score, bb_score))
-                low_score_and_large_rmsd = rmsd_small >= 1.0 and bb_score <= (relax_score+2)
-                if bb_score < relax_score:
-                    print("Moving on found lower score during GenKIC...")
-                    print("Relax Score: %.4f and GenKIC Score: %.4f" % (relax_score, bb_score))
-                    is_stable = False
-                    break
-            print("This peptide is stable? %s\n" % is_stable)
+            is_stable = helpfuncs.simple_cycpep_predict_proxy(
+                    pose = selection_pose,
+                    scorefxn = scorefxn,
+                    N = 100,
+                    )
             if is_stable:
-                # Write a pose to the file, but check to make sure it is available
+                # Write a pose to the file but check to make sure it is available
                 silentClass.write_when_not_busy(pose, core.pose.tag_from_pose(pose))
                 print("Total Time For GenKIC with nstruct of 100 was %.3f seconds" % float(time.time() - time_start))
 

@@ -24,6 +24,9 @@ from pyrosetta.rosetta.core.select.movemap import MoveMapFactory
 from pyrosetta.rosetta.core.pack.palette import CustomBaseTypePackerPalette
 from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 
+# filter funcstions
+import filters as filterfuncs
+
 # python imports
 import os
 import portalocker
@@ -1240,7 +1243,6 @@ def build_unbiased_pose(
 def simple_cycpep_predict_proxy(
         pose: core.pose.Pose,
         scorefxn: ScoreFunction,
-        randomize_root: bool = False,
         N: int = 100,
         DEBUG: bool = False,
         ) -> bool:
@@ -1266,6 +1268,21 @@ def simple_cycpep_predict_proxy(
     # init our out variable
     is_stable = False
 
+    # init a highhbond variant of our scorefxn
+    scorefxn_highhbond = core.scoring.ScoreFunction(scorefxn.clone())
+
+    # upweight hbonds
+    scorefxn_highhbond.set_weight(
+            core.scoring.hbond_lr_bb, 10*scorefxn.get_weight(
+                core.scoring.hbond_lr_bb
+                )
+            )
+    scorefxn_highhbond.set_weight(
+            core.scoring.hbond_sr_bb, 10*scorefxn.get_weight(
+                core.scoring.hbond_sr_bb
+                )
+            )
+
     # score input
     init_score = scorefxn(pose)
 
@@ -1277,13 +1294,14 @@ def simple_cycpep_predict_proxy(
         # Generate conformation and relax
         genkic_out = apply_genkic(
                 pose = clean_pose,
-                scorefxn = scorefxn,
+                scorefxn = scorefxn_highhbond,
                 randomize_root = True,
+                DEBUG = DEBUG,
                 )
         relax_selection(
                 currpose = genkic_out,
                 res_selection = rs.TrueResidueSelector(),
-                scorefxn = scorefxn,
+                scorefxn = scorefxn_highhbond,
                 cartesian = args.cartesian,
                 )
 
