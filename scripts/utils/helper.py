@@ -1524,7 +1524,7 @@ def simple_cycpep_predict_proxy(
                 (genkic_score <= init_score+2) and 
                 (rmsd_genkic_to_design <= 0.6)
                 )
-        if genkic_score < init_score or low_rmsd_and_low_score:
+        if (genkic_score < init_score+2) or (low_rmsd_and_low_score):
             print("Found a lower energy conformation, skipping this design...")
             is_stable = False
             break
