@@ -5,6 +5,7 @@
 #               modular.
 
 # PyRosetta imports
+import pyrosetta
 import pyrosetta.io as io
 import pyrosetta.rosetta as rosetta
 import pyrosetta.rosetta.core as core
@@ -24,16 +25,16 @@ from pyrosetta.rosetta.core.select.movemap import MoveMapFactory
 from pyrosetta.rosetta.core.pack.palette import CustomBaseTypePackerPalette
 from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 
-# filter funcstions
-import filters as filterfuncs
 
 # python imports
-import os
+import os, sys
 import portalocker
 import time
 import random
 from typing import Union, List, Tuple
 
+# filter funcstions
+from . import filters as filterfuncs
 
 ### Classes (Empty for now, as the funcitons should be modular enough to
 ### use within a class)
@@ -315,7 +316,7 @@ def declare_terminal_bond(
         atom1 = 'C',
         res2 = n_term,
         atom2 ='N',
-        add_termini = True,
+        add_termini = False,
     )
     declarebond.apply(pose)
     pose.update_residue_neighbors()
@@ -1123,6 +1124,7 @@ def anchor_randomizebyrama(
 def apply_genkic(pose: core.pose.Pose,
                  scorefxn: ScoreFunction,
                  randomize_root: bool = False,
+                 pp: protocols.rosetta_scripts.ParsedProtocol|None = None,
                  DEBUG: bool = False,
                  ) -> core.pose.Pose:
     """
@@ -1154,6 +1156,10 @@ def apply_genkic(pose: core.pose.Pose,
     GenKIC.set_closure_attempts(500) # changed from 500
     GenKIC.set_min_solution_count(1)
     GenKIC.set_selector_type("lowest_energy_selector")
+    if pp != None:
+        GenKIC.set_preselection_mover(pp)
+    GenKIC.set_correct_polymer_dependent_atoms(True)
+
     GenKIC.set_selector_scorefunction(scorefxn)
     # Add bb randomization for Anchor (rama prepro) if doing selection
     if randomize_root:
@@ -1200,6 +1206,35 @@ def apply_genkic(pose: core.pose.Pose,
 
     return pose.clone()
 
+def gen_correct_l_d_resname(resname: str) -> str:
+    """Grab the correct 4 letter D-chiral resname, if L-chiral just return resname"""
+    conversion_dict = dict()
+    conversion_dict["DSE"] = "DSER"
+    conversion_dict["DAL"] = "DALA"
+    conversion_dict["DAR"] = "DARG"
+    conversion_dict["DAN"] = "DASN"
+    conversion_dict["DAS"] = "DASP"
+    conversion_dict["DCY"] = "DCYS"
+    conversion_dict["DGU"] = "DGLU"
+    conversion_dict["DGN"] = "DGLN"
+    conversion_dict["DHI"] = "DHIS"
+    conversion_dict["DIL"] = "DILE"
+    conversion_dict["DLE"] = "DLEU"
+    conversion_dict["DLY"] = "DLYS"
+    conversion_dict["DME"] = "DMET"
+    conversion_dict["DPR"] = "DPRO"
+    conversion_dict["DTH"] = "DTHR"
+    conversion_dict["DTR"] = "DTRP"
+    conversion_dict["DTY"] = "DTYR"
+    conversion_dict["DVA"] = "DVAL"
+    conversion_dict["DPH"] = "DPHE"
+
+    if resname.startswith("D"):
+        return conversion_dict[resname]
+    else:
+        return resname
+
+
 def build_unbiased_pose(
         pose: core.pose.Pose,
         ) -> core.pose.Pose:
@@ -1217,15 +1252,15 @@ def build_unbiased_pose(
     # Generate an empty pose and stubmover
     new_pose = core.pose.Pose()
     stub_mover = protocols.cyclic_peptide.PeptideStubMover()
-    stub_mover.set_reset_mode(true)
-    stubmover.reset_mover_data()
+    stub_mover.set_reset_mode(True)
+    stub_mover.reset_mover_data()
 
     # Thread the amino acids onto our pose
     for ir in range(1, pose.total_residue()+1):
         # grab the three residue 
         stub_mover.add_residue(
                 stubmode ="Append",
-                resname = pose.residue(ir).name3(),
+                resname = gen_correct_l_d_resname(pose.residue(ir).name3()),
                 position = 0,
                 jumpmode = False,
                 connecting_atom = "",
@@ -1239,15 +1274,79 @@ def build_unbiased_pose(
     stub_mover.apply(new_pose)
     return new_pose
 
+def do_final_relax(
+        pose: core.pose.Pose,
+        scorefxn: core.scoring.ScoreFunction,
+        relax_rounds: int,
+        angle_min: bool,
+        length_min: bool,
+        cartesian_min: bool,
+        ) -> int:
+    """Carry out the final FastRelax within our
+    Simple_cycpep_predict_proxy function
+
+    PARAMS
+    ------
+    :pose: Our genkic output pose
+    :scorefxn: The scorefunction to use
+    :relax_rounds: Number of relaxation rounds to use
+    :angle_min: Minimize angles if not cartesian
+    :length_min: Minimize lengths if not cartesian
+    :cartesian_min: Minimize using cartesian
+    """
+    # setup the fastrelax
+    frlx = protocols.relax.FastRelax(scorefxn, 1)
+    if cartesian_min:
+        frlx.cartesian(True)
+    else:
+        if angle_min:
+            frlx.minimize_bond_angles(True)
+        if length_min:
+            frlx.minimize_bond_lengths(True)
+
+    # Final declare bond
+    final_termini = protocols.simple_moves.DeclareBond()
+    assert pose.residue(1).has_lower_connect(), "Residue 1 does not have a lower connect"
+    assert pose.residue(pose.size()).has_upper_connect(), "Last Residue does not have an upper connect"
+    firstatom = pose.residue(1).atom_name(pose.residue(1).lower_connect_atom())
+    lastatom = pose.residue(pose.size()).atom_name(pose.residue(pose.size()).upper_connect_atom())
+    final_termini.set(
+        res1 = pose.size(),
+        atom1 = lastatom,
+        res2 = 1,
+        atom2 = firstatom,
+        add_termini = False,
+        run_kic = False,
+        kic_res1 = 0,
+        kic_res2 = 0,
+        rebuild_fold_tree = False,
+    )
+
+    scorefxn(pose)
+    # Calc energy
+    cur_energy = pose.energies().total_energy()
+    for _ in range(relax_rounds):
+        pose_copy = pose.clone()
+        frlx.apply(pose_copy)
+        final_termini.apply(pose_copy)
+        scorefxn(pose_copy)
+        if pose_copy.energies().total_energy() < cur_energy:
+            cur_energy = pose_copy.energies().total_energy()
+            pose = pose_copy
+    return pose.clone()
+
 
 def simple_cycpep_predict_proxy(
         pose: core.pose.Pose,
-        scorefxn: ScoreFunction,
+        scorefxn: ScoreFunction|None = None,
         N: int = 100,
+        relax_rounds: int = 3,
+        score_cutoff: float = -4.0,
         DEBUG: bool = False,
         ) -> bool:
     """Run a simple_cycpep_predict proxy for N rounds, to see if a cyclic
-    peptide is stable. This wont determine if a peptide is actually stable, but will possibly give you a quick way of determining if something is worth folding.
+    peptide is stable. This wont determine if a peptide is actually stable, 
+    but will possibly give you a quick way of determining if something is worth folding.
     We are assuming that the peptide has been minimized before this function.
 
     PARAMS
@@ -1258,6 +1357,8 @@ def simple_cycpep_predict_proxy(
         or when you have anchors
     :N: The number of rounds to run GenKIC, basically the number of decoys /
         conformations you want to test against the design.
+    :relax_rounds: The number of final relax rounds
+    :score_cutoff: A score cutoff for the initial score check
     :DEBUG: Adds some TRACE outputs
 
     RETURNS
@@ -1265,12 +1366,17 @@ def simple_cycpep_predict_proxy(
     :is_stable: True if no conformations were found to be lower energy then
             design, False if a conformation was found.
     """
+    # gen scorefunc if none
+    if scorefxn == None:
+        scorefxn = pyrosetta.create_score_function("ref2015")
+
     # init our out variable
-    is_stable = False
+    is_stable = True
 
     # init a highhbond variant of our scorefxn
-    scorefxn_highhbond = core.scoring.ScoreFunction(scorefxn.clone())
+    scorefxn_default = scorefxn.clone()
 
+    scorefxn_highhbond = scorefxn.clone()
     # upweight hbonds
     scorefxn_highhbond.set_weight(
             core.scoring.hbond_lr_bb, 10*scorefxn.get_weight(
@@ -1282,43 +1388,137 @@ def simple_cycpep_predict_proxy(
                 core.scoring.hbond_sr_bb
                 )
             )
+    scorefxn_default_cst = scorefxn_default.clone()
+    if scorefxn_default_cst.get_weight(core.scoring.atom_pair_constraint) == 0.0:
+        scorefxn_default_cst.set_weight(core.scoring.atom_pair_constraint, 1.0)
+    if scorefxn_default_cst.get_weight(core.scoring.angle_constraint) == 0.0:
+        scorefxn_default_cst.set_weight(core.scoring.angle_constraint, 1.0)
+    if scorefxn_default_cst.get_weight(core.scoring.dihedral_constraint) == 0.0:
+        scorefxn_default_cst.set_weight(core.scoring.dihedral_constraint, 1.0)
+    if scorefxn_default_cst.get_weight(core.scoring.chainbreak) == 0.0:
+        scorefxn_default_cst.set_weight(core.scoring.chainbreak, 1.0)
+    scorefxn_highhbond_cst = scorefxn_highhbond.clone()
+    if scorefxn_highhbond_cst.get_weight(core.scoring.atom_pair_constraint) == 0.0:
+        scorefxn_highhbond_cst.set_weight(core.scoring.atom_pair_constraint, 1.0)
+    if scorefxn_highhbond_cst.get_weight(core.scoring.angle_constraint) == 0.0:
+        scorefxn_highhbond_cst.set_weight(core.scoring.angle_constraint, 1.0)
+    if scorefxn_highhbond_cst.get_weight(core.scoring.dihedral_constraint) == 0.0:
+        scorefxn_highhbond_cst.set_weight(core.scoring.dihedral_constraint, 1.0)
+    if scorefxn_highhbond_cst.get_weight(core.scoring.chainbreak) == 0.0:
+        scorefxn_highhbond_cst.set_weight(core.scoring.chainbreak, 1.0)
+
+    # set cart versions
+    scorefxn_highhbond_cst_cart = scorefxn_highhbond_cst.clone()
+    if scorefxn_highhbond_cst_cart.get_weight(core.scoring.cart_bonded) == 0.0:
+        scorefxn_highhbond_cst_cart.set_weight(core.scoring.cart_bonded, 0.5)
+        scorefxn_highhbond_cst_cart.set_weight(core.scoring.pro_close, 0.0)
+
+    scorefxn_default_cst_cart = scorefxn_default_cst.clone()
+    if scorefxn_default_cst_cart.get_weight(core.scoring.cart_bonded) == 0.0:
+        scorefxn_default_cst_cart.set_weight(core.scoring.cart_bonded, 0.5)
+        scorefxn_default_cst_cart.set_weight(core.scoring.pro_close, 0.0)
 
     # score input
-    init_score = scorefxn(pose)
+    init_score = scorefxn_default(pose)
+
+    if init_score > score_cutoff:
+        print("Skipping before cycpep predict, because score is too high alrady %.3f" % init_score)
+        return False
 
     # loop through genkic outputs
     for nstruct in range(1, N+1):
         # Make a clean un biased pose that can have genkic applied to it
         clean_pose = build_unbiased_pose(pose)
+        set_foldtree(clean_pose)
+        modify_termini_to_cutpoints(clean_pose, 1, clean_pose.size())
+        declare_terminal_bond(clean_pose, 1, clean_pose.size())
+
+        # setup preselection_mover
+        pp = protocols.rosetta_scripts.ParsedProtocol()
+
+        # Add a update bond func
+        update_OH = protocols.simple_moves.DeclareBond()
+        assert clean_pose.residue(1).has_lower_connect(), "Residue 1 does not have a lower connect"
+        assert clean_pose.residue(clean_pose.size()).has_upper_connect(), "Last Residue does not have an upper connect"
+        firstatom = clean_pose.residue(1).atom_name(clean_pose.residue(1).lower_connect_atom())
+        lastatom = clean_pose.residue(clean_pose.size()).atom_name(clean_pose.residue(clean_pose.size()).upper_connect_atom())
+        update_OH.set(
+            res1 = clean_pose.size(),
+            atom1 = lastatom,
+            res2 = 1,
+            atom2 = firstatom,
+            add_termini = False,
+            run_kic = False,
+            kic_res1 = 0,
+            kic_res2 = 0,
+            rebuild_fold_tree = False,
+        )
+        pp.add_step(update_OH, "update_OH_beginning", None)
+
+        # Check for oversats
+        oversatfilt1 = protocols.cyclic_peptide.OversaturatedHbondAcceptorFilter()
+        oversatfilt1.set_scorefxn(scorefxn_default)
+        oversatfilt1.set_hbond_energy_cutoff(-0.25)
+        pp.add_step(None, "Oversaturated_Hbond_Acceptors", oversatfilt1)
+
+        # Run FastRelax
+        fr = protocols.relax.FastRelax(scorefxn_highhbond_cst_cart, relax_rounds)
+        fr.minimize_bond_angles(True)
+        pp.add_step(fr, "High_Hbond_FastRelax_Cartesian", None)
+
+        # Update OH again
+        pp.add_step( update_OH, "Update_cyclization_point_polymer_dependent_atoms_2", None )
+
+        # Check for oversats again
+        oversatfilt2 = protocols.cyclic_peptide.OversaturatedHbondAcceptorFilter()
+        oversatfilt2.set_scorefxn(scorefxn_default)
+        oversatfilt2.set_hbond_energy_cutoff(-0.25)
+        pp.add_step(None, "Postrelax_Oversaturated_Hbond_Acceptors", oversatfilt2)
+
 
         # Generate conformation and relax
         genkic_out = apply_genkic(
                 pose = clean_pose,
-                scorefxn = scorefxn_highhbond,
+                scorefxn = scorefxn_highhbond_cst,
                 randomize_root = True,
+                pp = pp,
                 DEBUG = DEBUG,
                 )
-        relax_selection(
-                currpose = genkic_out,
-                res_selection = rs.TrueResidueSelector(),
-                scorefxn = scorefxn_highhbond,
-                cartesian = args.cartesian,
+
+        # Final relax after genkic
+        genkic_out_cart = do_final_relax(genkic_out,
+                       scorefxn_default_cst_cart,
+                       relax_rounds,
+                       False,
+                       False,
+                       True,
+                       )
+        genkic_out_relax = do_final_relax(
+                genkic_out_cart,
+                scorefxn_default_cst,
+                1,
+                False,
+                False,
+                False,
                 )
 
+
         # Score our output and check the RMSD change
-        genkic_score = scorefxn(genkic_out)
+        genkic_score = scorefxn_default(genkic_out_relax)
         rmsd_genkic_to_design = filterfuncs.compare_rmsd_pose(
                 pose,
-                genkic_out,
+                genkic_out_relax,
                 rs.TrueResidueSelector(),
                 rs.TrueResidueSelector(),
                 True,
                 "test_%i_rmsd" % nstruct,
                 )
+        declare_terminal_bond(genkic_out_relax, 1, genkic_out_relax.size())
+        genkic_out.dump_pdb("genkic_%i_pose.pdb" % nstruct)
 
         # Now check to see our design is stable
-        print("RMSD Dif: %.4f , Init Score: %.4f GenKIC Score: %.4f" % (
-            rmsd_genkic_to_design, init_score, genkic_score,
+        print("Nstruct: %i ==> RMSD Dif: %.3f , Init Score: %.3f , GenKIC Score: %.3f" % (
+            nstruct, rmsd_genkic_to_design, init_score, genkic_score
             ))
         low_rmsd_and_low_score = (
                 (genkic_score <= init_score+2) and 
@@ -1328,6 +1528,11 @@ def simple_cycpep_predict_proxy(
             print("Found a lower energy conformation, skipping this design...")
             is_stable = False
             break
+        # Clear out the poses
+        genkic_out.clear()
+        genkic_out_cart.clear()
+        genkic_out_relax.clear()
+        clean_pose.clear()
 
     if is_stable:
         print("Possibly stable! Good Design")

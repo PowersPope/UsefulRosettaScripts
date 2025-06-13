@@ -177,6 +177,7 @@ def main():
                     )
 
             print("Silent Struct:", struct_num, 
+                  "tag Name:", core.pose.tag_from_pose(pose),
                   "Peptide Alone Score:", selection_score, 
                   "Relaxed Peptide Score:", relax_score,
                   "Relax RMSD BB Heavy Change:", rmsd_relax)
@@ -188,8 +189,9 @@ def main():
             time_start = time.time()
             is_stable = helpfuncs.simple_cycpep_predict_proxy(
                     pose = selection_pose,
-                    scorefxn = scorefxn,
+                    scorefxn = None,
                     N = 100,
+                    score_cutoff = args.cutoff,
                     )
             if is_stable:
                 # Write a pose to the file but check to make sure it is available
