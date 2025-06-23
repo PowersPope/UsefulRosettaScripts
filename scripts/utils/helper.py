@@ -1026,7 +1026,11 @@ def relax_sidechains(
     fr.apply(pose)
     return 0
 
-def init_scorefunction(default: bool=False,) -> ScoreFunction:
+def init_scorefunction(
+                       cst: bool = False,
+                       cartesian: bool = False,
+                       scorefunc_name: str = "ref2015",
+                       ) -> ScoreFunction:
     """Define and init our scorefunction;
     This will be based on a macrocycle, and making sure the right terms
     are defined to keep geometry correct. This should be tailored to your
@@ -1034,28 +1038,34 @@ def init_scorefunction(default: bool=False,) -> ScoreFunction:
 
     PARAMS
     ------
-    :default: This makes it so that the default scorefunction is made,
-        instead of the macrocycle specific one
+    :cst: Which is a cst scorefunction for a macrocycle, though no cartesian
+    :cartesian: Cartesian without cst, unless cst is specified as well
+    :scorefunc_name: Specific scorefunction name. Keep ref2015 unless you know which
+        specific scorefunc you want
 
     RETURNS
     -------
     :scorefxn: Our defined scorefunction object
     """
-    # init class global variables
-    scorefxn = core.scoring.get_score_function(is_fullatom = True)
-    # Stop here if we want default
-    if default:
-        return scorefxn
-    scorefxn.set_weight(core.scoring.hbond_lr_bb, 1.0)
-    scorefxn.set_weight(core.scoring.hbond_sr_bb, 1.0)
-    scorefxn.set_weight(core.scoring.coordinate_constraint, 1.0)
-    scorefxn.set_weight(core.scoring.atom_pair_constraint, 1.0)
-    scorefxn.set_weight(core.scoring.dihedral_constraint, 1.0)
-    scorefxn.set_weight(core.scoring.angle_constraint, 1.0)
-    scorefxn.set_weight(core.scoring.chainbreak, 1.0)
-    emopts = core.scoring.methods.EnergyMethodOptions(scorefxn.energy_method_options())
-    emopts.hbond_options().decompose_bb_hb_into_pair_energies(True)
-    scorefxn.set_energy_method_options(emopts)
+    scorefxn = pyrosetta.create_score_function(scorefunc_name)
+    if cst:
+        scorefxn.set_weight(core.scoring.atom_pair_constraint, 1.0)
+        scorefxn.set_weight(core.scoring.angle_constraint, 1.0)
+        scorefxn.set_weight(core.scoring.dihedral_constraint, 1.0)
+        scorefxn.set_weight(core.scoring.chainbreak, 1.0)
+#         scorefxn.set_weight(core.scoring.hbond_lr_bb, 1.0)
+#         scorefxn.set_weight(core.scoring.hbond_sr_bb, 1.0)
+#         scorefxn.set_weight(core.scoring.coordinate_constraint, 1.0)
+#         scorefxn.set_weight(core.scoring.atom_pair_constraint, 1.0)
+#         scorefxn.set_weight(core.scoring.dihedral_constraint, 1.0)
+#         scorefxn.set_weight(core.scoring.angle_constraint, 1.0)
+#         scorefxn.set_weight(core.scoring.chainbreak, 1.0)
+        emopts = core.scoring.methods.EnergyMethodOptions(scorefxn.energy_method_options())
+        emopts.hbond_options().decompose_bb_hb_into_pair_energies(True)
+        scorefxn.set_energy_method_options(emopts)
+    if cartesian:
+        scorefxn.set_weight(core.scoring.cart_bonded, 0.5)
+        scorefxn.set_weight(core.scoring.pro_close, 0.0)
     return scorefxn
 
 def residues_to_perturb(peptide_length: int, root: int) -> List[int]:
