@@ -464,6 +464,7 @@ def grab_atomid_map(
         residue_anchors: List[int],
         target_start_resi: int = 2,
         ref_chain: int = 2,
+        bb_heavy_only: bool = False,
         ) -> map_core_id_AtomID_core_id_AtomID:
     """Build an AtomID map for superimpose_pose call to function
 
@@ -474,6 +475,7 @@ def grab_atomid_map(
     :pose_target: Our peptide/macrocycle byitself not in the context of the target
     :residue_anchors: A list of residues that we want to align against (1-index)
     :target_start_resi: The starting resi of the targets motif (1-index)
+    :bb_heavy_only: Grab only the heavy bb atoms or all non-H atoms
 
     RETURNS
     -------
@@ -511,6 +513,7 @@ def place_peptide_incontext(
         ref_chain: int,
         residue_anchors: List[int],
         target_start_resi: int = 2,
+        bb_heavy_only: bool = False,
         ) -> core.pose.Pose:
     """Place a peptide that is by itself in context with the target receptor.
         This will be done along the motif (residue_anchor)
@@ -520,7 +523,8 @@ def place_peptide_incontext(
     :pose_reference: The receptor or target we designed macrocycles for. This should have
         the peptide or binder we used as a base/anchor for our peptide generation.
     :pose_target: Our peptide/macrocycle byitself not in the context of the target
-    :ref_chain: I am going to write this as if there are only 2 chains present
+    :ref_chain: I am going to write this as if there are only 2 chains present, this is 
+            the chain to remove.
     :residue_anchors: A list of residues that we want to align against (1-index)
     :target_start_resi: The starting resi of the targets motif (1-index)
 
@@ -529,12 +533,19 @@ def place_peptide_incontext(
     :target_peptide: A new pose where our receptor and macrocycle/peptide are now
         placed together.
     """
+    # We want to make sure that our ref pose doesnt have any weird term variant types
+    for ir in range(pose_reference.chain_begin(ref_chain), pose_reference.chain_end(ref_chain)+1): 
+        remove_term_variants(pose_reference, ir, ir)
+
+
+
     # generate an atom map 
     atom_map = grab_atomid_map(
             pose_reference,
             pose_target,
             residue_anchors,
             target_start_resi,
+            bb_heavy_only=bb_heavy_only,
             )
 
     # Superimpose
