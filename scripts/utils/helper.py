@@ -504,6 +504,7 @@ def grab_atomid_map(
         # Loop through atoms
         for ia in range(1, curres.natoms()+1):
             if curres.atom_is_hydrogen( ia ): continue
+            if bb_heavy_only and curres.atom_name( ia ).strip() not in ["N", "CA", "O", "C"]: continue
             atid_map[AtomID(ia, fzn_posit)] = AtomID(ia, nat_fzn_posit)
     return atid_map
 
@@ -695,6 +696,7 @@ def search_proline_mutate(
         residue_selection: rs,
         scorefxn: ScoreFunction,
         number_prolines: int = 1,
+        cartesian_min: bool = True,
         ) -> Tuple[bool, List[int]]:
     """Search the rama of residues that could be a proline
     if they are not invovled in hydrogen bonding then mutate until
@@ -717,7 +719,8 @@ def search_proline_mutate(
     # init our count
     mutated_prolines = 0
     proline_positions = list()
-    base_score = scorefxn(pose)
+    scorefxn(pose)
+    base_score = pose.energies().total_energy()
 
     # grab the proline positions
     dpro_selector = rs.BinSelector()
@@ -745,6 +748,11 @@ def search_proline_mutate(
     # Get the resi numbers for looping
     specific_proline_resi = core.select.get_residues_from_subset(specific_prolines.apply(pose))
 
+    # setup the fastrelax
+    frlx = protocols.relax.FastRelax(scorefxn, 1)
+    if cartesian_min:
+        frlx.cartesian(True)
+
     # There are no positions that match our criteria within our selection. An empty list is returned, so exit
     if not specific_proline_resi:
         assert specific_proline_resi == {}, f"proline resi are not empty. There is a bug: {len(specific_proline_resi)}"
@@ -768,10 +776,14 @@ def search_proline_mutate(
             if not hydrogen_bond_check(pose, ir):
                 pose_clone = pose.clone()
                 mutate_residue(pose_clone, ir, "PRO")
+                modify_termini_to_cutpoints(pose_clone, 1, pose_clone.size())
+                declare_terminal_bond(pose_clone, 1, pose_clone.size())
+                frlx.apply(pose_clone)
                 mutated_prolines+=1
-                new_score = scorefxn(pose_clone)
+                scorefxn(pose_clone)
+                new_score = pose_clone.energies().total_energy()
                 print("New Proline Check: %i with a new score of %.3f. Compared against a base score of %.3f" % (ir, new_score, base_score))
-                if new_score < base_score:
+                if new_score < base_score or mutated_prolines == 1:
                     base_score = new_score
                     low_position = ir
                 pose_clone.clear()
@@ -779,6 +791,9 @@ def search_proline_mutate(
         if mutated_prolines > 0:
             mutate_residue(pose, low_position, "PRO")
             proline_positions.append(low_position)
+            if low_position == 1 or low_position == pose.size():
+                modify_termini_to_cutpoints(pose, 1, pose.size())
+                declare_terminal_bond(pose, 1, pose.size())
             return (True, proline_positions)
     # If we get to here, then we did not mutate enough positions to meet our criteria therefore the filter fails.
     # However, our pose was still possibly mutated if you have more then 1 desired proline. (keep in mind)
