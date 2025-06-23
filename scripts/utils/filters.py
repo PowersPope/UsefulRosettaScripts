@@ -312,6 +312,43 @@ def score_selection_outofcontext(
     currpose.scores[filtername] = score
     return score
 
+def specificsite_hbond_filter(
+        currpose: core.pose.Pose,
+        res_selection: ResidueSelector,
+        resnum: int,
+        scorefxn: ScoreFunction,
+        hbond_amount: int = 1,
+        ) -> bool:
+    """Check that a pose contains a hydrogen bond within our desired selection between
+    chains.
+
+    PARAMS
+    ------
+    :currpose: Our designed pose
+    :res_selection: The residue selection that will be used to see if they contain
+        a hbond with the residue specified in resnum
+    :resnum: The rosetta residue index being checked to contain a hbond
+    :scorefxn: Scorefxn to use for checking present Hbonds
+    :hbond_amount: Number of hbonds present that we want
+
+    RETURNS
+    -------
+    :contains_bond: Bool of if there is a desired hbond amount
+    """
+    # Setup our filter
+    resHbondCounter = protocols.protein_interface_design.filters.HbondsToResidueFilter()
+    resHbondCounter.set_backbone(True)
+    resHbondCounter.set_bb_bb(True)
+    resHbondCounter.set_energy_cutoff(-0.25)
+    resHbondCounter.set_from_other_chains(True)
+    resHbondCounter.set_from_same_chain(False)
+    resHbondCounter.set_partners(hbond_amount)
+    resHbondCounter.set_scorefxn(scorefxn)
+    resHbondCounter.set_selector(res_selection)
+    resHbondCounter.set_resnum(resnum)
+    resHbondCounter.set_sidechain(True)
+    contains_bond = resHbondCounter.apply(currpose)
+    return contains_bond
 
 def interface_analyzer(
         currpose: core.pose.Pose,
