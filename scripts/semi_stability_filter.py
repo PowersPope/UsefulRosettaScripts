@@ -176,11 +176,11 @@ def main():
                     "pre_relax_rmsd",
                     )
 
-            print("Silent Struct:", struct_num, 
+            print("Silent Struct: %.3f" % struct_num, 
                   "tag Name:", core.pose.tag_from_pose(pose),
-                  "Peptide Alone Score:", selection_score, 
-                  "Relaxed Peptide Score:", relax_score,
-                  "Relax RMSD BB Heavy Change:", rmsd_relax)
+                  "Peptide Alone Score: %.3f" % selection_score, 
+                  "Relaxed Peptide Score: %.3f" % relax_score,
+                  "Relax RMSD BB Heavy Change: %.3f" % rmsd_relax)
             if relax_score > args.cutoff or rmsd_relax > 0.7:
                 print("Score is too high or RMSD change was too large! Moving on to next struct...")
                 continue
