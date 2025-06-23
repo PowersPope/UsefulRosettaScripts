@@ -1161,6 +1161,7 @@ def apply_genkic(pose: core.pose.Pose,
                  scorefxn: ScoreFunction,
                  randomize_root: bool = False,
                  pp: protocols.rosetta_scripts.ParsedProtocol|None = None,
+                 closure_attempts: int = 500,
                  DEBUG: bool = False,
                  ) -> Tuple[core.pose.Pose, bool]:
     """
@@ -1172,6 +1173,8 @@ def apply_genkic(pose: core.pose.Pose,
     :pose: Our input glycine pose that has been set up
     :scorefxn: Scorefunction to use for checking our output
     :randomize_root: This is for only insolution generation and not design or when you have anchors
+    :pp: A specified ParsedProtocol, should be utilized so that each successful attempt this is evaluated as well
+    :closure_attempts: Number of closure attempts to attempt. If a large proportion is unsuccessful then increase this
     :DEBUG: Adds some TRACE outputs
 
     RETURNS
@@ -1190,7 +1193,7 @@ def apply_genkic(pose: core.pose.Pose,
     non_root_residues = get_nonroot_residues(pep_len, root)
     # init the genkic class object
     GenKIC = genkic.GeneralizedKIC()
-    GenKIC.set_closure_attempts(500) # changed from 500
+    GenKIC.set_closure_attempts(closure_attempts) # changed from 500
     GenKIC.set_min_solution_count(1)
     GenKIC.set_selector_type("lowest_energy_selector")
     if pp != None:
@@ -1323,6 +1326,7 @@ def do_final_relax(
         angle_min: bool,
         length_min: bool,
         cartesian_min: bool,
+        DEBUG: bool = False,
         ) -> int:
     """Carry out the final FastRelax within our
     Simple_cycpep_predict_proxy function
@@ -1335,6 +1339,7 @@ def do_final_relax(
     :angle_min: Minimize angles if not cartesian
     :length_min: Minimize lengths if not cartesian
     :cartesian_min: Minimize using cartesian
+    :DEBUG: Helpful print statements to determine if the func works
     """
     # setup the fastrelax
     frlx = protocols.relax.FastRelax(scorefxn, 1)
@@ -1367,13 +1372,17 @@ def do_final_relax(
     scorefxn(pose)
     # Calc energy
     cur_energy = pose.energies().total_energy()
+    if DEBUG: print("Current Energy before relax rounds:", cur_energy)
     for _ in range(relax_rounds):
         pose_copy = pose.clone()
         frlx.apply(pose_copy)
         final_termini.apply(pose_copy)
         scorefxn(pose_copy)
-        if pose_copy.energies().total_energy() < cur_energy:
-            cur_energy = pose_copy.energies().total_energy()
+        score_pose_copy = pose_copy.energies().total_energy()
+        if DEBUG: print("pose_copy after relax score:", score_pose_copy)
+        if score_pose_copy < cur_energy:
+            if DEBUG: print("Replacing Pose and cur_energy with minimized values (since lower score found)")
+            cur_energy = score_pose_copy
             pose = pose_copy
     return pose.clone()
 
@@ -1384,6 +1393,7 @@ def simple_cycpep_predict_proxy(
         N: int = 100,
         relax_rounds: int = 3,
         score_cutoff: float = -4.0,
+        closure_attempts: int = 500,
         DEBUG: bool = False,
         ) -> bool:
     """Run a simple_cycpep_predict proxy for N rounds, to see if a cyclic
@@ -1401,6 +1411,7 @@ def simple_cycpep_predict_proxy(
         conformations you want to test against the design.
     :relax_rounds: The number of final relax rounds
     :score_cutoff: A score cutoff for the initial score check
+    :closure_attempts: Number of closure attempts to attempt. If a large proportion is unsuccessful then increase this
     :DEBUG: Adds some TRACE outputs
 
     RETURNS
@@ -1521,16 +1532,17 @@ def simple_cycpep_predict_proxy(
 
 
         # Generate conformation and relax
-        genkic_out, succ = apply_genkic( # Add in bool to know if it fails and then cont if it did
+        genkic_out, succ = apply_genkic(
                 pose = clean_pose,
                 scorefxn = scorefxn_highhbond_cst,
                 randomize_root = True,
                 pp = pp,
+                closure_attempts = closure_attempts,
                 DEBUG = DEBUG,
                 )
 
         if not succ: 
-            print("GenKIC didn't find solution. Skipping to next round...")
+            print("GenKIC was not able to find a solution. Skipping to next round... (If this happens a lot consider upping the number of rounds in GenKIC)")
             not_successful +=1
             continue
 
@@ -1542,13 +1554,16 @@ def simple_cycpep_predict_proxy(
                 False,
                 False,
                 False,
+                DEBUG = DEBUG,
                 )
-        genkic_out_cart = do_final_relax(genkic_out_relax,
-                       scorefxn_default_cst_cart, 
-                       1,
-                       False,
-                       False,
-                       True,
+        genkic_out_cart = do_final_relax(
+                genkic_out_relax,
+                scorefxn_default_cst_cart, 
+                1,
+                False,
+                False,
+                True,
+                DEBUG = DEBUG,
                        )
 
         # Score our output and check the RMSD change
