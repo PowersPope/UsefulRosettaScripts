@@ -1162,7 +1162,7 @@ def apply_genkic(pose: core.pose.Pose,
                  randomize_root: bool = False,
                  pp: protocols.rosetta_scripts.ParsedProtocol|None = None,
                  DEBUG: bool = False,
-                 ) -> core.pose.Pose:
+                 ) -> Tuple[core.pose.Pose, bool]:
     """
     Apply the generalized kinematic loop closure to a pose. This will designate the appropriate
     size genkic to apply
@@ -1177,6 +1177,7 @@ def apply_genkic(pose: core.pose.Pose,
     RETURNS
     -------
     :genkic_pose: A stochastically sampled backbone given sequence RAMA preferences
+    :genkic_success: Whether genkic found a solution or not
     """
     # Get the length of our pose
     pep_len = pose.total_residue()
@@ -1193,6 +1194,7 @@ def apply_genkic(pose: core.pose.Pose,
     GenKIC.set_min_solution_count(1)
     GenKIC.set_selector_type("lowest_energy_selector")
     if pp != None:
+        if DEBUG: print("-- PP is being applied within GENKIC ---")
         GenKIC.set_preselection_mover(pp)
     GenKIC.set_correct_polymer_dependent_atoms(True)
 
@@ -1228,8 +1230,8 @@ def apply_genkic(pose: core.pose.Pose,
         rsd3 = pivot_res[2],
         at3 = "CA",
     )
-    GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_alpha_backbone_by_rama)
-    GenKIC.set_perturber_custom_rama_table("flat_symm_dl_aa_ramatable")
+    GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
+#     GenKIC.set_perturber_custom_rama_table("flat_symm_dl_aa_ramatable") # This removes the density from our rama table. Might not be good to use
     for ir in free_residues:
         GenKIC.add_residue_to_perturber_residue_list(ir)
     GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
@@ -1239,8 +1241,12 @@ def apply_genkic(pose: core.pose.Pose,
         GenKIC.set_filter_rama_cutoff_energy(2)
 
     GenKIC.apply(pose)
+    genkic_succ = GenKIC.last_run_successful()
 
-    return pose.clone()
+    # Clear our genkic just incase
+    GenKIC.clear_info()
+
+    return pose.clone(), genkic_succ
 
 def gen_correct_l_d_resname(resname: str) -> str:
     """Grab the correct 4 letter D-chiral resname, if L-chiral just return resname"""
@@ -1409,9 +1415,8 @@ def simple_cycpep_predict_proxy(
     # init our out variable
     is_stable = True
 
-    # init a highhbond variant of our scorefxn
+    # Clone our scorefxn and create some extra variants
     scorefxn_default = scorefxn.clone()
-
     scorefxn_highhbond = scorefxn.clone()
     # upweight hbonds
     scorefxn_highhbond.set_weight(
@@ -1455,13 +1460,16 @@ def simple_cycpep_predict_proxy(
         scorefxn_default_cst_cart.set_weight(core.scoring.pro_close, 0.0)
 
     # score input
-    init_score = scorefxn_default(pose)
+    scorefxn_default(pose)
+    init_score = pose.energies().total_energy()
+    print()
 
     if init_score > score_cutoff:
-        print("Skipping before cycpep predict, because score is too high alrady %.3f" % init_score)
+        print("Skipping before cycpep predict, because score is too high already %.3f" % init_score)
         return False
 
     # loop through genkic outputs
+    not_successful = 0
     for nstruct in range(1, N+1):
         # Make a clean un biased pose that can have genkic applied to it
         clean_pose = build_unbiased_pose(pose)
@@ -1513,7 +1521,7 @@ def simple_cycpep_predict_proxy(
 
 
         # Generate conformation and relax
-        genkic_out = apply_genkic(
+        genkic_out, succ = apply_genkic( # Add in bool to know if it fails and then cont if it did
                 pose = clean_pose,
                 scorefxn = scorefxn_highhbond_cst,
                 randomize_root = True,
@@ -1521,47 +1529,53 @@ def simple_cycpep_predict_proxy(
                 DEBUG = DEBUG,
                 )
 
+        if not succ: 
+            print("GenKIC didn't find solution. Skipping to next round...")
+            not_successful +=1
+            continue
+
         # Final relax after genkic
-        genkic_out_cart = do_final_relax(genkic_out,
-                       scorefxn_default_cst_cart,
-                       relax_rounds,
-                       False,
-                       False,
-                       True,
-                       )
         genkic_out_relax = do_final_relax(
-                genkic_out_cart,
+                genkic_out,
                 scorefxn_default_cst,
-                1,
+                relax_rounds,
                 False,
                 False,
                 False,
                 )
-
+        genkic_out_cart = do_final_relax(genkic_out_relax,
+                       scorefxn_default_cst_cart, 
+                       1,
+                       False,
+                       False,
+                       True,
+                       )
 
         # Score our output and check the RMSD change
-        genkic_score = scorefxn_default(genkic_out_relax)
+        scorefxn_default(genkic_out_cart)
+        genkic_score = genkic_out_cart.energies().total_energy()
         rmsd_genkic_to_design = filterfuncs.compare_rmsd_pose(
                 pose,
-                genkic_out_relax,
+                genkic_out_cart,
                 rs.TrueResidueSelector(),
                 rs.TrueResidueSelector(),
                 True,
                 "test_%i_rmsd" % nstruct,
                 )
-        declare_terminal_bond(genkic_out_relax, 1, genkic_out_relax.size())
-        genkic_out.dump_pdb("genkic_%i_pose.pdb" % nstruct)
+        declare_terminal_bond(genkic_out_cart, 1, genkic_out_cart.size())
+#         genkic_out.dump_pdb("genkic_%i_pose.pdb" % nstruct)
 
         # Now check to see our design is stable
         print("Nstruct: %i ==> RMSD Dif: %.3f , Init Score: %.3f , GenKIC Score: %.3f" % (
             nstruct, rmsd_genkic_to_design, init_score, genkic_score
             ))
         low_rmsd_and_low_score = (
-                (genkic_score <= init_score+2) and 
-                (rmsd_genkic_to_design >= 0.75)
+                (genkic_score <= init_score+1) and 
+                (rmsd_genkic_to_design >= 0.9)
                 )
         if genkic_score < init_score or low_rmsd_and_low_score:
             print("Found a lower energy conformation, skipping this design...")
+            print("Number of unsuccessful generations:", not_successful, "This is %.3f of the total folds tried" % (not_successful / nstruct))
             is_stable = False
             break
         # Clear out the poses
@@ -1571,6 +1585,7 @@ def simple_cycpep_predict_proxy(
         clean_pose.clear()
 
     if is_stable:
-        print("Possibly stable! Good Design")
+        print("Number of unsuccessful generations:", not_successful, "This is %.3f of the total folds" % (not_successful / N))
+        print("Possibly stable! Worth folding and possibly a good design")
     return is_stable
 
