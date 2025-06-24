@@ -1164,6 +1164,7 @@ def apply_genkic(pose: core.pose.Pose,
                  pp: protocols.rosetta_scripts.ParsedProtocol|None = None,
                  closure_attempts: int = 500,
                  lowest_rmsd: bool = False,
+                 small_perturb: bool = False,
                  DEBUG: bool = False,
                  ) -> Tuple[core.pose.Pose, bool]:
     """
@@ -1178,6 +1179,7 @@ def apply_genkic(pose: core.pose.Pose,
     :pp: A specified ParsedProtocol, should be utilized so that each successful attempt this is evaluated as well
     :closure_attempts: Number of closure attempts to attempt. If a large proportion is unsuccessful then increase this
     :lowest_rmsd: Set the selector to lowest rmsd and not energy (criteria for picking solution; this is for a jitter to input)
+    :small_perturb: Make small changes to the input pose (5.0 dihedrals)
     :DEBUG: Adds some TRACE outputs
 
     RETURNS
@@ -1240,7 +1242,11 @@ def apply_genkic(pose: core.pose.Pose,
         rsd3 = pivot_res[2],
         at3 = "CA",
     )
-    GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
+    if small_perturb:
+        GenKIC.add_perturber(genkic.perturber.perturber_effect.perturb_dihedral)
+        GenKIC.add_value_to_perturber_value_list(5.0)
+    else:
+        GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
 #     GenKIC.set_perturber_custom_rama_table("flat_symm_dl_aa_ramatable") # This removes the density from our rama table. Might not be good to use
     for ir in free_residues:
         GenKIC.add_residue_to_perturber_residue_list(ir)
