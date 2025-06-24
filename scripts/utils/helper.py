@@ -499,7 +499,8 @@ def grab_atomid_map(
         refres = pose_reference.residue(nat_fzn_posit)
 
         # Assert
-        assert curres.natoms() == refres.natoms(), "The number of atoms do not match"
+        if not bb_heavy_only:
+            assert curres.natoms() == refres.natoms(), "The number of atoms do not match"
 
         # Loop through atoms
         for ia in range(1, curres.natoms()+1):
