@@ -1199,6 +1199,7 @@ def apply_genkic(pose: core.pose.Pose,
     GenKIC.set_min_solution_count(1)
     if lowest_rmsd:
         GenKIC.set_selector_type("lowest_rmsd_selector")
+        GenKIC.set_input_pose(pose)
     else:
         GenKIC.set_selector_type("lowest_energy_selector")
     if pp != None:
