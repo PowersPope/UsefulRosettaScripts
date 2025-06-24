@@ -225,6 +225,7 @@ def count_polar_interactions(
         currpose: core.pose.Pose,
         interfaceA: ResidueSelector,
         interfaceB: ResidueSelector,
+        calculate_only: bool = False,
         filtername_prefix: str = "polar_interactions_count_",
         ) -> int:
     """Count the number of non-covalent polar interactions across the two selections
@@ -234,11 +235,12 @@ def count_polar_interactions(
     :currpose: filled pose with target and receptor
     :interfaceA: The target/peptide interactions
     :interfaceB: The non target interface residues
+    :calculate_only: As we dont want this added to the pose, but we want the output
     :filtername_prefix: Set the prefix name of the filter on the score header
 
     RETURNS
     -------
-    Number of polar interactions 
+    Number of polar interactions if calculate_only else 0 for successful call
     """
     # Setup our filter
     hbondMetric = core.simple_metrics.per_residue_metrics.HbondMetric()
@@ -247,6 +249,9 @@ def count_polar_interactions(
     hbondMetric.set_residue_selector(interfaceA)
     hbondMetric.set_residue_selector2(interfaceB)
     # Apply it, it will get stashed in our pose's score
+    if calculate_only:
+        polar_interactions = hbondMetric.calculate(currpose)
+        return polar_interactions
     hbondMetric.apply(currpose, prefix=filtername_prefix)
     return 0
 

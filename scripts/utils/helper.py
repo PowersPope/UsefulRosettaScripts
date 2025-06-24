@@ -1162,6 +1162,7 @@ def apply_genkic(pose: core.pose.Pose,
                  randomize_root: bool = False,
                  pp: protocols.rosetta_scripts.ParsedProtocol|None = None,
                  closure_attempts: int = 500,
+                 lowest_rmsd: bool = False,
                  DEBUG: bool = False,
                  ) -> Tuple[core.pose.Pose, bool]:
     """
@@ -1175,6 +1176,7 @@ def apply_genkic(pose: core.pose.Pose,
     :randomize_root: This is for only insolution generation and not design or when you have anchors
     :pp: A specified ParsedProtocol, should be utilized so that each successful attempt this is evaluated as well
     :closure_attempts: Number of closure attempts to attempt. If a large proportion is unsuccessful then increase this
+    :lowest_rmsd: Set the selector to lowest rmsd and not energy (criteria for picking solution; this is for a jitter to input)
     :DEBUG: Adds some TRACE outputs
 
     RETURNS
@@ -1193,9 +1195,12 @@ def apply_genkic(pose: core.pose.Pose,
     non_root_residues = get_nonroot_residues(pep_len, root)
     # init the genkic class object
     GenKIC = genkic.GeneralizedKIC()
-    GenKIC.set_closure_attempts(closure_attempts) # changed from 500
+    GenKIC.set_closure_attempts(closure_attempts) 
     GenKIC.set_min_solution_count(1)
-    GenKIC.set_selector_type("lowest_energy_selector")
+    if lowest_rmsd:
+        GenKIC.set_selector_type("lowest_rmsd_selector")
+    else:
+        GenKIC.set_selector_type("lowest_energy_selector")
     if pp != None:
         if DEBUG: print("-- PP is being applied within GENKIC ---")
         GenKIC.set_preselection_mover(pp)
