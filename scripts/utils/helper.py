@@ -1244,11 +1244,20 @@ def apply_genkic(pose: core.pose.Pose,
     if small_perturb:
         GenKIC.add_perturber(genkic.perturber.perturber_effect.perturb_dihedral)
         GenKIC.add_value_to_perturber_value_list(5.0)
+        for ir in free_residues:
+            atomset = rosetta.utility.vector1_core_id_NamedAtomID()
+            atomset.append(core.id.NamedAtomID("N", ir))
+            atomset.append(core.id.NamedAtomID("CA", ir))
+            GenKIC.add_atomset_to_perturber_atomset_list(atomset)
+            atomset2 = rosetta.utility.vector1_core_id_NamedAtomID()
+            atomset2.append(core.id.NamedAtomID("CA", ir))
+            atomset2.append(core.id.NamedAtomID("C", ir))
+            GenKIC.add_atomset_to_perturber_atomset_list(atomset2)
     else:
         GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
 #     GenKIC.set_perturber_custom_rama_table("flat_symm_dl_aa_ramatable") # This removes the density from our rama table. Might not be good to use
-    for ir in free_residues:
-        GenKIC.add_residue_to_perturber_residue_list(ir)
+        for ir in free_residues:
+            GenKIC.add_residue_to_perturber_residue_list(ir)
     GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
     for ir in non_root_residues:
         GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
