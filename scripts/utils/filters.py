@@ -47,6 +47,7 @@ def compare_rmsd_pose(
         refsel: ResidueSelector,
         cursel: ResidueSelector,
         superimpose: bool = False,
+        calculate: bool = False,
         filtername: str = "relax_after_design_",
         ) -> float:
     """Generate a RMSD metric with all bb heavy atoms including O
@@ -58,6 +59,7 @@ def compare_rmsd_pose(
     :refsel: the selection in the reference
     :curesel: the selection in the current pose
     :superimpose: True run superimpose before calc, False dont
+    :calculate: RMSD metric calc only and store in value, dont apply
     :filtername: The name of our filter that will show up in the score file
 
     RETURNS
@@ -74,9 +76,12 @@ def compare_rmsd_pose(
                              )
     rmsdMetric.set_run_superimpose(superimpose)
 
-    # apply the filter
-    rmsdMetric.apply(currpose, filtername)
-    return rmsdMetric.calculate(currpose)
+    if calculate:
+        return rmsdMetric.calculate(currpose)
+    else:
+        # apply the filter
+        rmsdMetric.apply(currpose, filtername)
+        return rmsdMetric.calculate(currpose)
 
 
 def determine_internal_bb_hbonds(
