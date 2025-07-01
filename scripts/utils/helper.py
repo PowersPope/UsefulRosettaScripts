@@ -539,8 +539,6 @@ def place_peptide_incontext(
     for ir in range(pose_reference.chain_begin(ref_chain), pose_reference.chain_end(ref_chain)+1): 
         remove_term_variants(pose_reference, ir, ir)
 
-
-
     # generate an atom map 
     atom_map = grab_atomid_map(
             pose_reference,
@@ -1054,13 +1052,6 @@ def init_scorefunction(
         scorefxn.set_weight(core.scoring.angle_constraint, 1.0)
         scorefxn.set_weight(core.scoring.dihedral_constraint, 1.0)
         scorefxn.set_weight(core.scoring.chainbreak, 1.0)
-#         scorefxn.set_weight(core.scoring.hbond_lr_bb, 1.0)
-#         scorefxn.set_weight(core.scoring.hbond_sr_bb, 1.0)
-#         scorefxn.set_weight(core.scoring.coordinate_constraint, 1.0)
-#         scorefxn.set_weight(core.scoring.atom_pair_constraint, 1.0)
-#         scorefxn.set_weight(core.scoring.dihedral_constraint, 1.0)
-#         scorefxn.set_weight(core.scoring.angle_constraint, 1.0)
-#         scorefxn.set_weight(core.scoring.chainbreak, 1.0)
         emopts = core.scoring.methods.EnergyMethodOptions(scorefxn.energy_method_options())
         emopts.hbond_options().decompose_bb_hb_into_pair_energies(True)
         scorefxn.set_energy_method_options(emopts)
@@ -1165,6 +1156,8 @@ def apply_genkic(pose: core.pose.Pose,
                  closure_attempts: int = 500,
                  lowest_rmsd: bool = False,
                  small_perturb: bool = False,
+                 perturb_iterations: int = 20,
+                 min_solutions: int = 1,
                  DEBUG: bool = False,
                  ) -> Tuple[core.pose.Pose, bool]:
     """
@@ -1180,6 +1173,8 @@ def apply_genkic(pose: core.pose.Pose,
     :closure_attempts: Number of closure attempts to attempt. If a large proportion is unsuccessful then increase this
     :lowest_rmsd: Set the selector to lowest rmsd and not energy (criteria for picking solution; this is for a jitter to input)
     :small_perturb: Make small changes to the input pose (5.0 dihedrals)
+    :perturb_iterations: Allows you to control the amount of iterations the perturber is applied
+    :min_solutions: Number of solutions that need to be found
     :DEBUG: Adds some TRACE outputs
 
     RETURNS
@@ -1199,7 +1194,7 @@ def apply_genkic(pose: core.pose.Pose,
     # init the genkic class object
     GenKIC = genkic.GeneralizedKIC()
     GenKIC.set_closure_attempts(closure_attempts) 
-    GenKIC.set_min_solution_count(1)
+    GenKIC.set_min_solution_count(min_solutions)
     if lowest_rmsd:
         GenKIC.set_selector_type("lowest_rmsd_selector")
         GenKIC.set_input_pose(pose)
@@ -1243,8 +1238,10 @@ def apply_genkic(pose: core.pose.Pose,
         at3 = "CA",
     )
     if small_perturb:
+        print("perturb with nothing")
         GenKIC.add_perturber(genkic.perturber.perturber_effect.perturb_dihedral)
         GenKIC.add_value_to_perturber_value_list(5.0)
+        GenKIC.set_perturber_iterations(1)
         for ir in free_residues:
             atomset = rosetta.utility.vector1_core_id_NamedAtomID()
             atomset.append(core.id.NamedAtomID("N", ir))
@@ -1256,7 +1253,6 @@ def apply_genkic(pose: core.pose.Pose,
             GenKIC.add_atomset_to_perturber_atomset_list(atomset2)
     else:
         GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
-#     GenKIC.set_perturber_custom_rama_table("flat_symm_dl_aa_ramatable") # This removes the density from our rama table. Might not be good to use
         for ir in free_residues:
             GenKIC.add_residue_to_perturber_residue_list(ir)
     GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
@@ -1341,6 +1337,77 @@ def build_unbiased_pose(
     stub_mover.apply(new_pose)
     return new_pose
 
+def relax_func(
+        pose: core.pose.Pose,
+        scorefxn: core.scoring.ScoreFunction,
+        relax_rounds: int,
+        angle_min: bool,
+        length_min: bool,
+        cartesian_min: bool,
+        mmf: MoveMapFactory|None = None,
+        DEBUG: bool = False,
+        ) -> int:
+    """Carry out the final FastRelax within our
+    Simple_cycpep_predict_proxy function
+
+    PARAMS
+    ------
+    :pose: Our genkic output pose
+    :scorefxn: The scorefunction to use
+    :relax_rounds: Number of relaxation rounds to use
+    :angle_min: Minimize angles if not cartesian
+    :length_min: Minimize lengths if not cartesian
+    :cartesian_min: Minimize using cartesian
+    :mmf: A movemapfactory for specifying movements allowed
+    :DEBUG: Helpful print statements to determine if the func works
+    """
+    # setup the fastrelax
+    frlx = protocols.relax.FastRelax(scorefxn, 1)
+    if mmf != None:
+        frlx.set_movemap_factory(mmf)
+    if cartesian_min:
+        frlx.cartesian(True)
+    else:
+        if angle_min:
+            frlx.minimize_bond_angles(True)
+        if length_min:
+            frlx.minimize_bond_lengths(True)
+
+    # Final declare bond
+    final_termini = protocols.simple_moves.DeclareBond()
+    assert pose.residue(1).has_lower_connect(), "Residue 1 does not have a lower connect"
+    assert pose.residue(pose.size()).has_upper_connect(), "Last Residue does not have an upper connect"
+    firstatom = pose.residue(1).atom_name(pose.residue(1).lower_connect_atom())
+    lastatom = pose.residue(pose.size()).atom_name(pose.residue(pose.size()).upper_connect_atom())
+    final_termini.set(
+        res1 = pose.size(),
+        atom1 = lastatom,
+        res2 = 1,
+        atom2 = firstatom,
+        add_termini = False,
+        run_kic = False,
+        kic_res1 = 0,
+        kic_res2 = 0,
+        rebuild_fold_tree = False,
+    )
+
+    scorefxn(pose)
+    # Calc energy
+    cur_energy = pose.energies().total_energy()
+    if DEBUG: print("Current Energy before relax rounds:", cur_energy)
+    for _ in range(relax_rounds):
+        pose_copy = pose.clone()
+        frlx.apply(pose_copy)
+        final_termini.apply(pose_copy)
+        scorefxn(pose_copy)
+        score_pose_copy = pose_copy.energies().total_energy()
+        if DEBUG: print("pose_copy after relax score:", score_pose_copy)
+        if score_pose_copy < cur_energy:
+            if DEBUG: print("Replacing Pose and cur_energy with minimized values (since lower score found)")
+            cur_energy = score_pose_copy
+            pose = pose_copy
+    return pose.clone()
+
 def do_final_relax(
         pose: core.pose.Pose,
         scorefxn: core.scoring.ScoreFunction,
@@ -1407,6 +1474,82 @@ def do_final_relax(
             cur_energy = score_pose_copy
             pose = pose_copy
     return pose.clone()
+
+def is_supported_restype(restype: core.chemical.ResidueType) -> bool:
+    """Is a residue type supported for macrocycle structure prediction.
+    Currently returns True for alpha-, beta-, or gamma-amino acids and for peptoids,
+    False otherwise
+    """
+    return restype.is_alpha_aa() or restype.is_beta_aa() or restype.is_gamma_aa() or restype.is_peptoid() or restype.is_oligourea
+
+def randomize_mainchain_torsions(
+        pose: core.pose.Pose,
+        use_rama_prepro_for_sampling: bool = False,
+        n_to_c_cyclize: bool = True,
+        ) -> int:
+    """Randomize the main chain torsions by Ramachandran preference.
+    Sets all omegas to 180.
+
+    PARAMS
+    ------
+    :pose: OUr linear input pose (as this is for simple_cycpep_predict_proxy)
+    :use_rama_prepro_for_sampling: Determines if our sampling is rama prepro or not
+    :n_to_c_cyclize: Our input is cyclized N- to C-termini.
+    """
+    # init our rama plots and values
+    nres = pose.size()
+    rama = core.scoring.ScoringManager().get_Ramachandran()
+    ramaprepro = core.scoring.ScoringManager.get_RamaPrePro()
+    default_rama_table_type = core.scoring.Rama_Table_Type.flat_symm_gly_ramatable
+
+    # loop through our residues
+    for ir in range(1, pose.size()+1):
+        # Check if our residue type is alpha, gamma, beta, peptoid, or oligourea
+        if is_supported_restype(pose.residue_type(ir)):
+            # Init our vector
+            rand_torsions = rosetta.utility.vector1_double(pose.residue(ir).mainchain_torsions().size() - 1, 0.0)
+            # Current implementation doesnt have a custom_rama_check (add if I want to expand)
+            if default_rama_table_type != core.scoring.unknown_ramatable_type:
+                if pose.residue_type(ir).is_alpha_aa():
+                    rama.draw_random_phi_psi_from_extra_cdf( default_rama_table_type, rand_torsions[1], rand_torsions[2] )
+            else:
+                if use_rama_prepro_for_sampling:
+                    # if N-to-C Cyclized then use 
+                    if n_to_c_cyclize and (ir == nres):
+                        following_rsd = pose.residue_type_ptr(pose.residue(ir).residue_connection_partner(pose.residue(ir).upper_connect().index()))
+                    else:
+                        following_rsd = core.chemical.ResidueTypeFinder(
+                                core.chemical.ChemicalManager().residue_type_set( core.checmical.FA_STANDARD )
+                                ).residue_base_name("ALA").get_representatitve_type()
+                    ramaprepro.random_mainchain_torsions(pose.conformation(), pos.residue_type_ptr(ir), following_rsd, rand_torsions)
+                    covered_torsions = rosetta.utility.vector1_unsigned_long( ramaprepro.get_mainchain_torsions_covered( pose.conformation(), pose.residue_type_ptr(ir), following_rsd ) )
+                    assert pose.residue(ir).mainchain_torsions().size() - 1 == rand_torsions.size(), "Mainchain Torsions dont match rand_torsions vector size"
+                    # We want to copy over all non mainchain torsions, so that they are not set to zero
+                    for j in range(1, rand_torsions.size()+1):
+                        if not covered_torsions.has_value(j):
+                            rand_torsions[j] = pose.residue(ir).mainchain_torsions()[j]
+                # We are not using rama prepro for sampling therefore a classic rama table
+                else:
+                    if pose.residue(ir).backbone_aa() != core.chemical.aa_unk:
+                        rama.random_phipsi_from_rama( pose.residue(ir).backbone_aa(), rand_torsions[1], rand_torsions[2] )
+                    else:
+                        assert pose.residue_type(ir).aa() != core.chemical.aa_unk, "Error in helper.randomize_mainchain_torsions: Unable to get a suitable classic Ramachandran table for " + pose.residue_type(ir).name() + "."
+                        rama.random_phipsi_from_rama( pose.residue_type(ir).aa(), rand_torsions[1], rand_torsions[2] )
+            # Set torsions and make Omega 180
+            for j in range(1, rand_torsions.size()+1):
+                pose.set_torsion( core.id.TorsionID(ir, core.id.BB, j), rand_torsions[j] )
+            if ir != nres: pose.set_omega(ir, 180.0)
+            if pose.residue_type(ir).is_oligourea(): pose.set_mu(ir, 180.0)
+        # This is an unsupported type
+        else:
+            for j in range(1, pose.residue(ir).mainchain_torsions().size()+1):
+                if (ir == nres) and (j == pose.residue(ir).mainchain_torsions().size()+1): continue
+                setting = core.Real(180.0)
+                if j != pose.residue(ir).mainchain_torsions().size()+1:
+                    setting = rosetta.numeric.rg().uniform()*360.0 - 180.0
+                pose.set_torsion( core.id.TorsionID(ir, core.id.BB, j), setting )
+
+    return 0
 
 
 def simple_cycpep_predict_proxy(
@@ -1495,7 +1638,6 @@ def simple_cycpep_predict_proxy(
     # score input
     scorefxn_default(pose)
     init_score = pose.energies().total_energy()
-    print()
 
     if init_score > score_cutoff:
         print("Skipping before cycpep predict, because score is too high already %.3f" % init_score)
@@ -1509,6 +1651,7 @@ def simple_cycpep_predict_proxy(
         set_foldtree(clean_pose)
         modify_termini_to_cutpoints(clean_pose, 1, clean_pose.size())
         declare_terminal_bond(clean_pose, 1, clean_pose.size())
+        randomize_mainchain_torsions(clean_pose, use_rama_prepro_for_sampling=True, n_to_c_cyclize=True)
 
         # setup preselection_mover
         pp = protocols.rosetta_scripts.ParsedProtocol()
