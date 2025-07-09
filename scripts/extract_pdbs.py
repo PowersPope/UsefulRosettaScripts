@@ -17,7 +17,7 @@ if __name__ == "__main__":
     p.add_argument("--single-input", action="store_true", help="Specify if only passing a csv with one silentfile")
     args = p.parse_args()
 
-    init(extra_options="-in:file:fullatom")
+    init(extra_options="-in:file:fullatom true")
 
     # Make the outdir if it doesnt exist yet.
     if not os.path.exists(args.outfile_dir):
