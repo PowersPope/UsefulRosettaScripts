@@ -26,35 +26,42 @@ if __name__ == "__main__":
     # store our output
     df = pd.read_csv(args.input_file)
 
-    for row in range(df.shape[0]):
-        print("Output:", row)
-        # extract row
-        out = df.iloc[row,:]
-        # Extract data
-        file = out.file
-        tag = out.tag
+    # get list of unique silentfiles
+    silentfiles = df.tag.unique()
 
-        # Setup the silentFile output
-        if row == 0 and args.single_input:
-            opts = silent.SilentFileOptions()
-            opts.in_fullatom(True)
-            opts.set_binary_output(True)
-            silentfile = silent.SilentFileData(opts)
-            silentfile._read_file(os.path.join(args.silentfile_dir, file+".silent"))
-        elif not args.single_input:
-            opts = silent.SilentFileOptions()
-            opts.in_fullatom(True)
-            opts.set_binary_output(True)
-            silentfile = silent.SilentFileData(opts)
-            silentfile._read_file(os.path.join(args.silentfile_dir, file+".silent"))
+    # iter through groups and make subdfs
+    for sf in silentfiles:
+        sub_df = df[df.tag == sf].reset_index()
 
-        # grab the structure
-        struct = silentfile.get_structure(tag)
-        # set and fill pose
-        pose = Pose()
-        struct.fill_pose(pose)
+        for row in range(sub_df.shape[0]):
+            print("Output:", row)
+            # extract row
+            out = sub_df.iloc[row,:]
+            # Extract data
+            file = out.file
+            tag = out.tag
 
-        filename = tag + ".pdb"
+    #         # Setup the silentFile output
+            if row == 0 and args.single_input:
+                opts = silent.SilentFileOptions()
+                opts.in_fullatom(True)
+                opts.set_binary_output(True)
+                silentfile = silent.SilentFileData(opts)
+                silentfile._read_file(os.path.join(args.silentfile_dir, file+".silent"))
+#             elif not args.single_input:
+#                 opts = silent.SilentFileOptions()
+#                 opts.in_fullatom(True)
+#                 opts.set_binary_output(True)
+#                 silentfile = silent.SilentFileData(opts)
+#                 silentfile._read_file(os.path.join(args.silentfile_dir, file+".silent"))
 
-        pose.dump_pdb(os.path.join(args.outfile_dir,filename))
-        pose.clear()
+            # grab the structure
+            struct = silentfile.get_structure(tag)
+            # set and fill pose
+            pose = Pose()
+            struct.fill_pose(pose)
+
+            filename = tag + ".pdb"
+
+            pose.dump_pdb(os.path.join(args.outfile_dir,filename))
+            pose.clear()
