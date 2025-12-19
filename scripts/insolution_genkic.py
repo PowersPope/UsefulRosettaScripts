@@ -168,6 +168,7 @@ class BackboneGeneration:
         return filter_check
 
     def anchor_randomizebyrama(self,
+                               pose: io.Pose,
                                anchor_resi: int,
                                ) -> protocols.backbone_moves.RandomizeBBByRamaPrePro:
         """
@@ -176,6 +177,7 @@ class BackboneGeneration:
 
         PARAMS
         ------
+        :pose: Our Pose with the residue to randomize
         :anchor_resi: The residue index position of our anchor (1-indexing)
 
         RETURNS
@@ -186,6 +188,7 @@ class BackboneGeneration:
         randomizeBB.set_residue_selector(
             select.ResidueIndexSelector(anchor_resi)
         )
+        randomizeBB.apply(pose)
         return randomizeBB.clone()
 
 
@@ -219,9 +222,9 @@ class BackboneGeneration:
         GenKIC.set_selector_scorefunction(self.scorefxn)
         # Add bb randomization for Anchor (rama prepro) if doing selection
         if self.randomize_root:
-            if self.DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS IS ONLY DONE FOR IN SOLUTION GENERATION)")
-            randomizeBB = self.anchor_randomizebyrama(root)
-            GenKIC.set_preselection_mover(randomizeBB)
+            if self.DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS IS ONLY DONE FOR IN SOLUTION GENERATION)\nApplying To Pose Brefore GenKIC Closure...")
+            randomizeBB = self.anchor_randomizebyrama(pose, root)
+#             GenKIC.set_preselection_mover(randomizeBB)
         for ir in non_root_residues:
             GenKIC.add_loop_residue(ir)
         GenKIC.close_bond(
@@ -248,8 +251,9 @@ class BackboneGeneration:
             rsd3 = pivot_res[2],
             at3 = "CA",
         )
-        GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_alpha_backbone_by_rama)
-        GenKIC.set_perturber_custom_rama_table("flat_symm_dl_aa_ramatable")
+        GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro)
+#         GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_alpha_backbone_by_rama)
+#         GenKIC.set_perturber_custom_rama_table("flat_symm_dl_aa_ramatable")
         for ir in free_residues:
             GenKIC.add_residue_to_perturber_residue_list(ir)
         GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
