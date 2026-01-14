@@ -487,7 +487,7 @@ def grab_atomid_map(
     # loop through our residues
     for ir in range(0, len(residue_anchors)):
         # check if our resiude is the final or first residue, then remove terminal ends if so
-        if pose_reference.size() == residue_anchors[0]:
+        if (pose_reference.size() in residue_anchors) or (1 in residue_anchors):
             remove_term_variants(
                 pose_reference, pose_reference.chain_begin(ref_chain),
                 pose_reference.chain_end(ref_chain),
@@ -495,6 +495,8 @@ def grab_atomid_map(
         # Grab the residues
         fzn_posit = ir+target_start_resi
         nat_fzn_posit = ir+residue_anchors[0]
+        if fzn_posit > pose_target.total_residue(): fzn_posit = fzn_posit % pose_target.total_residue()
+        if nat_fzn_posit > pose_reference.total_residue(): nat_fzn_posit = nat_fzn_posit % pose_reference.total_residue()
         curres = pose_target.residue(fzn_posit)
         refres = pose_reference.residue(nat_fzn_posit)
 
