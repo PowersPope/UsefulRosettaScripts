@@ -518,6 +518,7 @@ def place_peptide_incontext(
         residue_anchors: List[int],
         target_start_resi: int = 2,
         bb_heavy_only: bool = False,
+        ft: core.kinematics.FoldTree = None,
         ) -> core.pose.Pose:
     """Place a peptide that is by itself in context with the target receptor.
         This will be done along the motif (residue_anchor)
@@ -531,6 +532,9 @@ def place_peptide_incontext(
             the chain to remove.
     :residue_anchors: A list of residues that we want to align against (1-index)
     :target_start_resi: The starting resi of the targets motif (1-index)
+    :bb_heavy_only: Only place along the heavy bb atoms, and not full atom
+    :ft: An acceptable foldtree for the pose_target that will be added to our
+        pose_reference. If not passed then we will use the default foldtree
 
     RETURNS
     -------
@@ -540,6 +544,9 @@ def place_peptide_incontext(
     # We want to make sure that our ref pose doesnt have any weird term variant types
     for ir in range(pose_reference.chain_begin(ref_chain), pose_reference.chain_end(ref_chain)+1): 
         remove_term_variants(pose_reference, ir, ir)
+
+    # Extract the foldtree of the peptide only
+    ft_peptide = pose_target.fold_tree().clone()
 
     # generate an atom map 
     atom_map = grab_atomid_map(
@@ -577,6 +584,10 @@ def place_peptide_incontext(
     # This added because disulfides werent detected and found here:
     # https://forum.rosettacommons.org/node/3932
     pose_target.conformation().detect_disulfides()
+
+    ft_peptide.add_edge(pose_target.chain_end(1), pose_target.chain_begin(2), 1)
+    ft_peptide.add_edge(pose_target.chain_begin(2), pose_target.chain_end(2), -1)
+    pose_target.fold_tree(ft_peptide)
     return pose_target.clone()
 
 
@@ -1855,6 +1866,8 @@ def interface_cyclicpeptide_design(
         peptide_chain: int = 1,
         tf: TaskFactory|None = None,
         cartesian: bool = False,
+        ft: core.kinematics.FoldTree = None,
+        debug: bool = False,
         ) -> Tuple[core.pose.Pose, float]:
     """Run iterative relax in-solution and in-complex to promote
     stability and polar interactions
@@ -1871,6 +1884,10 @@ def interface_cyclicpeptide_design(
     :peptide_chain: Our peptide chain number
     :tf: A provided taskfactory
     :cartesian: Whether to perform cartesian relax or not.
+    :ft: A fold tree specified for our peptide region. If 
+        not specified then default foldtree is used.
+    :debug: bool to determine if we are dumping each
+        iterations pdb, for analysis.
 
     RETURNS
     -------
@@ -1897,13 +1914,13 @@ def interface_cyclicpeptide_design(
         mmf_alone.set_cartesian(True)
         mmf_alone.add_bondangles_action(
                 core.select.movemap.move_map_action.mm_enable,
-                rs.ChainSelector(peptide_chain),
-    #             peptide_sel,
+#                 rs.ChainSelector(peptide_chain),
+                peptide_sel,
                 )
         mmf_alone.add_bondlengths_action(
                 core.select.movemap.move_map_action.mm_enable,
-    #             rs.OrResidueSelector(target_sel, peptide_sel),
-                rs.ChainSelector(peptide_chain),
+                rs.OrResidueSelector(target_sel, peptide_sel),
+#                 rs.ChainSelector(peptide_chain),
                 )
 
     mmf = MoveMapFactory()
@@ -1970,6 +1987,7 @@ def interface_cyclicpeptide_design(
                 residue_anchors = ref_residues,
                 target_start_resi = target_start_resi,
                 bb_heavy_only = True,
+                ft = ft,
                 )
 #         print(f"--- ROUND {n+1} new_context_pose seq:", new_context_pose.sequence())
 
@@ -1993,7 +2011,7 @@ def interface_cyclicpeptide_design(
 
         final_pepscore, final_pepalone = generate_clean_conf(complex_relaxed, rs.ChainSelector(peptide_chain), scorefxn_score)
         print("Final Score of peptide %.3f and complex %.3f at end of Round %i of %i" % (final_pepscore, complex_final_score, n+1, relax_rounds))
-        complex_relaxed.dump_pdb(f"test_iteration{n+1}_relaxed.pdb")
+        if debug: complex_relaxed.dump_pdb(f"test_iteration{n+1}_relaxed.pdb")
 
         if final_pepscore < currpepscore:
             print("--- Iteration %i Has a lower scoring peptide and is moving on ---" % (n+1))
