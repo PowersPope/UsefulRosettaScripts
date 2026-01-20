@@ -1914,25 +1914,25 @@ def interface_cyclicpeptide_design(
     mmf.all_jumps(False)
     mmf.add_bb_action(
             core.select.movemap.move_map_action.mm_enable,
-            rs.ChainSelector(peptide_chain),
-#             peptide_sel,
+#             rs.ChainSelector(peptide_chain),
+            peptide_sel,
             )
     mmf.add_chi_action(
             core.select.movemap.move_map_action.mm_enable,
-#             rs.OrResidueSelector(target_sel, peptide_sel),
-            rs.OrResidueSelector(target_sel, rs.ChainSelector(peptide_chain)),
+            rs.OrResidueSelector(target_sel, peptide_sel),
+#             rs.OrResidueSelector(target_sel, rs.ChainSelector(peptide_chain)),
             )
     if cartesian:
         mmf.set_cartesian(True)
         mmf.add_bondangles_action(
                 core.select.movemap.move_map_action.mm_enable,
-                rs.ChainSelector(peptide_chain),
-    #             peptide_sel,
+#                 rs.ChainSelector(peptide_chain),
+                peptide_sel,
                 )
         mmf.add_bondlengths_action(
                 core.select.movemap.move_map_action.mm_enable,
-    #             rs.OrResidueSelector(target_sel, peptide_sel),
-                rs.ChainSelector(peptide_chain),
+                rs.OrResidueSelector(target_sel, peptide_sel),
+#                 rs.ChainSelector(peptide_chain),
                 )
 
 #     scorefxn_score(copy_iter_pose)
