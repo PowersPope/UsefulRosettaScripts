@@ -66,6 +66,9 @@ def compare_rmsd_pose(
     -------
     Calculated RMSD Metric
     """
+    # Clone our input pose, so that it isnt altered
+    currpose_clone = currpose.clone()
+
     # filter xml
     rmsdMetric = metrics.RMSDMetric()
     rmsdMetric.set_comparison_pose(refpose)
@@ -77,11 +80,11 @@ def compare_rmsd_pose(
     rmsdMetric.set_run_superimpose(superimpose)
 
     if calculate:
-        return rmsdMetric.calculate(currpose)
+        return rmsdMetric.calculate(currpose_clone)
     else:
         # apply the filter
-        rmsdMetric.apply(currpose, filtername)
-        return rmsdMetric.calculate(currpose)
+        rmsdMetric.apply(currpose_clone, filtername)
+        return rmsdMetric.calculate(currpose_clone)
 
 
 def determine_internal_bb_hbonds(
