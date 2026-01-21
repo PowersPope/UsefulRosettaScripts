@@ -1174,6 +1174,7 @@ def apply_genkic(pose: core.pose.Pose,
                  perturb_iterations: int = 1,
                  min_solutions: int = 1,
                  fix_residues: List[int]|None = None,
+                 root_pos: int = None,
                  DEBUG: bool = False,
                  ) -> Tuple[core.pose.Pose, bool]:
     """
@@ -1191,6 +1192,9 @@ def apply_genkic(pose: core.pose.Pose,
     :small_perturb: Make small changes to the input pose (5.0 dihedrals)
     :perturb_iterations: Allows you to control the amount of iterations the perturber is applied
     :min_solutions: Number of solutions that need to be found
+    :fix_residues: Residues that should not be perturbed
+    :root_pos: The root residue of our peptide. If not specified
+        then use normal FoldTree
     :DEBUG: Adds some TRACE outputs
 
     RETURNS
@@ -1200,7 +1204,7 @@ def apply_genkic(pose: core.pose.Pose,
     """
     # Get the length of our pose
     pep_len = pose.total_residue()
-    root = foldtree_define(pep_len)
+    root = root_pos if root_pos != None else foldtree_define(pep_len)
     first_loop_res = 1 # Hardcoded for testing
     
 
