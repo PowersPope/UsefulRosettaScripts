@@ -260,6 +260,62 @@ def count_polar_interactions(
     hbondMetric.apply(currpose, prefix=filtername_prefix)
     return 0
 
+def count_hbondset_across_interface( pose: core.Pose, 
+                                    debug: bool = False,
+                                    ) -> Tuple[int, dict[str,int]]:
+    """Using HBondSet count the number of hbonds across the interface
+    of a protein-peptide complex (can work for protein-protein complex too). 
+    This function assumes the pose being passed only has two chains and one interface.
+
+    PARAMS
+    ------
+    :pose: Pose that contains two chains and one interface. Written for a
+        receptor and peptide pairing, but can be used for protein-protein
+        complexes as well.
+    :debug: Output interaction trace information
+
+    RETURNS
+    -------
+    :num_interacts: The total number of hbonds across the interface
+    :hbond_counts: A dictionary containing bb-bb, sc-sc, and bb-sc hbond
+        counts across the interface.
+    """
+    # Setup our HBondSet and fill with relevent information from
+    # our pose
+    hbset = core.scoring.hbonds.HBondSet()
+    core.scoring.hbonds.fill_hbond_set(pose, False, hbset)
+
+    # Set up our type of interaction map
+    hbond_counts = {"bb-bb": 0, "sc-sc": 0, "bb-sc": 0}
+
+    # Loop over all hbonds within our filled HBondSet Object
+    for i in range(1, hbset.nhbonds()+1):
+        hb = hbset.hbond(i)
+        donor_res = hb.don_res()
+        acceptor_res = hb.acc_res()
+
+        # Only select hbonds that are across the interface (i.e. different chains)
+        if pose.residue(donor_res).chain() != pose.residue(acceptor_res).chain():
+            assert pose.residue(donor_res).atom_is_polar_hydrogen(hb.don_hatm()), "The donor atom is not polar. The way HBondSet was filled might be wrong."
+            # Determine if the donor or acceptor atom is a part of the backbone
+            donor_bb = pose.residue(donor_res).atom_is_backbone(hb.don_hatm())
+            acceptor_bb = pose.residue(acceptor_res).atom_is_backbone(hb.acc_atm())
+
+            if debug: print("Donor Res:", donor_res, "Acceptor Res:", acceptor_res)
+
+            # Map our type of hbond
+            if donor_bb and acceptor_bb:
+                hbond_counts["bb-bb"] += 1
+            elif not donor_bb and not acceptor_bb:
+                hbond_counts["sc-sc"] += 1
+            else:
+                hbond_counts["bb-sc"] += 1
+
+    # Sum the total number of hbonds across the interface
+    num_interacts = sum(hbond_counts.values())
+    return num_interacts, hbond_counts
+
+
 def grab_name3_sequence(
         currpose: core.pose.Pose,
         selection: ResidueSelector,
