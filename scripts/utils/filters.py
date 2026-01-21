@@ -263,7 +263,7 @@ def count_polar_interactions(
     hbondMetric.apply(currpose, prefix=filtername_prefix)
     return 0
 
-def count_hbondset_across_interface( pose: core.Pose, 
+def count_hbondset_across_interface( pose: core.pose.Pose, 
                                     debug: bool = False,
                                     ) -> Tuple[int, dict[str,int]]:
     """Using HBondSet count the number of hbonds across the interface
