@@ -200,6 +200,45 @@ def set_macrocycle_root(sequence_len: int) -> int:
     else:
         return int((sequence_len-1)/2)
 
+def flip_trans_omegabonds_set(
+        pose: core.pose.Pose,
+        begin: int,
+        end: int,
+        ) -> int:
+    """Flip the omega angles in the backbone to trans orientation
+    this needs to be done if PeptideStubMover was used first
+
+    PARAMS
+    ------
+    :pose: Our filled in pose
+    :begin: The beginning resi
+    :end: The ending resi
+
+    RETURNS
+    -------
+    A pose with trans omega bonds, as opposed to the default cis.
+    """
+    # First get our root
+    root = set_macrocycle_root(len(range(begin, end+1)))
+    # Unfortunately SetTorsion mover (which is used in RosettaScripts XML)
+    # Is not fully converted well to PyRosetta, so we will specify it in XML
+    xmlSetTorsion = f"""
+    <ROSETTASCRIPTS>
+        <MOVERS>
+            <SetTorsion name="flip_trans" foldtree_root="{root}">
+                <Torsion residue="{','.join([str(i) for i in range(begin, end+1)])}" torsion_name="omega" angle="180"/>
+            </SetTorsion>
+        </MOVERS>
+        <PROTOCOLS>
+            <Add mover="flip_trans"/>
+        </PROTOCOLS>
+    </ROSETTASCRIPTS>
+    """
+    setTorsion = protocols.rosetta_scripts.XmlObjects.create_from_string(xmlSetTorsion).get_mover("flip_trans")
+    setTorsion.apply(pose)
+
+    return 0
+
 def flip_trans_omegabonds(
         pose: core.pose.Pose,
         sequence_len: int,
@@ -1062,7 +1101,7 @@ def init_scorefunction(
     """
     scorefxn = pyrosetta.create_score_function(scorefunc_name)
     if cst:
-#         scorefxn.set_weight(core.scoring.coordinate_constraint, 1.0)
+        scorefxn.set_weight(core.scoring.coordinate_constraint, 1.0)
         scorefxn.set_weight(core.scoring.atom_pair_constraint, 1.0)
         scorefxn.set_weight(core.scoring.angle_constraint, 1.0)
         scorefxn.set_weight(core.scoring.dihedral_constraint, 1.0)
@@ -1074,6 +1113,35 @@ def init_scorefunction(
         scorefxn.set_weight(core.scoring.cart_bonded, 0.5)
         scorefxn.set_weight(core.scoring.pro_close, 0.0)
     return scorefxn
+
+def residues_to_perturb_complex(peptide_list: list[int], root: int) -> List[int]:
+    """
+    Determine which residues should be perturbed, based on macrocycle size
+
+    PARAMS
+    ------
+    :peptide_length: Amount of amino acids in our peptide
+    :root: The root residue idx
+
+    RETURNS
+    -------
+    :perturb_residues: A list of residues that are not pivots
+    :pivote_res: A list of pivot residues
+    """
+    # init our output
+    perturb_residues = []
+    pivot_res = []
+    # loop through our residues and get rid of +1, -1 from root
+    for ir in peptide_list:
+        if (ir != root+1) and (ir != root-1) and (ir != root) and (ir != peptide_list[-1]):
+            perturb_residues.append(ir)
+        elif ir != root:
+            pivot_res.append(ir)
+    # Fix Pivot RES order
+    while pivot_res[0] < root:
+        pre = pivot_res.pop(0)
+        pivot_res.append(pre)
+    return perturb_residues, pivot_res
 
 def residues_to_perturb(peptide_length: int, root: int) -> List[int]:
     """
@@ -1104,6 +1172,28 @@ def residues_to_perturb(peptide_length: int, root: int) -> List[int]:
         pivot_res.append(pre)
     return perturb_residues, pivot_res
 
+def get_nonroot_residues_complex(peptide_list: list[int], root: int, exclude_residues: List[int]|None = None) -> List[int]:
+    """
+    Grab the residue indexes in the order that they need to be in for GenKIC as in
+    from root -> peptide_length -> 1 -> root (where root is excluded)
+
+    PARAMS
+    ------
+    :peptide_length: Amount of amino acids in our peptide
+    :root: The root residue idx
+
+    RETURNS
+    -------
+    :non_root: A list of residues that are not the root residue. Also,
+        in the order that needs to be specified for genkic
+    """
+    # init list
+    non_root = [i for i in range(root+1, peptide_list[-1]+1)] # post root
+    pre_root = [i for i in range(peptide_list[0], root)]
+    non_root.extend(pre_root)
+
+    return non_root
+
 def get_nonroot_residues(peptide_length: int, root: int, exclude_residues: List[int]|None = None) -> List[int]:
     """
     Grab the residue indexes in the order that they need to be in for GenKIC as in
@@ -1125,6 +1215,23 @@ def get_nonroot_residues(peptide_length: int, root: int, exclude_residues: List[
     non_root.extend(pre_root)
 
     return non_root
+
+def foldtree_define_complex(resilist: list[int]) -> int:
+    """
+    Define what the root of our fold tree is
+
+    PARAMS
+    ------
+    :resilist (list[int]): Grab the foldtree complex
+
+    RETURNS
+    -------
+    :root (int): The root residue index from the list
+    """
+    if len(resilist) % 2 == 0:
+        return resilist[int(len(resilist)/2)]
+    else:
+        return resilist[int((len(resilist)-1)/2)]
 
 def foldtree_define(N: int) -> int:
     """
@@ -1163,6 +1270,159 @@ def anchor_randomizebyrama(
         rs.ResidueIndexSelector(anchor_resi)
     )
     return randomizeBB.clone()
+
+def apply_genkic_context(
+        pose: core.pose.Pose,
+        scorefxn: ScoreFunction,
+        randomize_root: bool = False,
+        pp: protocols.rosetta_scripts.ParsedProtocol|None = None,
+        closure_attempts: int = 500,
+        lowest_rmsd: bool = False,
+        small_perturb: bool = False,
+        perturb_iterations: int = 1,
+        min_solutions: int = 1,
+        fix_residues: List[int]|None = None,
+        chain: int = 1,
+        DEBUG: bool = False,
+        ) -> Tuple[core.pose.Pose, bool]:
+    """
+    Apply the generalized kinematic loop closure to a pose. This will designate the appropriate
+    size genkic to apply
+
+    PARAMS
+    ------
+    :pose: Our input glycine pose that has been set up
+    :scorefxn: Scorefunction to use for checking our output
+    :randomize_root: This is for only insolution generation and not design or when you have anchors
+    :pp: A specified ParsedProtocol, should be utilized so that each successful attempt this is evaluated as well
+    :closure_attempts: Number of closure attempts to attempt. If a large proportion is unsuccessful then increase this
+    :lowest_rmsd: Set the selector to lowest rmsd and not energy (criteria for picking solution; this is for a jitter to input)
+    :small_perturb: Make small changes to the input pose (5.0 dihedrals)
+    :perturb_iterations: Allows you to control the amount of iterations the perturber is applied
+    :min_solutions: Number of solutions that need to be found
+    :DEBUG: Adds some TRACE outputs
+
+    RETURNS
+    -------
+    :genkic_pose: A stochastically sampled backbone given sequence RAMA preferences
+    :genkic_success: Whether genkic found a solution or not
+    """
+    # Get the length of our pose
+    pep_len = list(range(pose.chain_begin(chain), pose.chain_end(chain)+1))
+    root = foldtree_define_complex(pep_len)
+    first_loop_res = pose.chain_begin(chain) 
+    
+
+    # Calculate which residues to perturb and set as pivots
+    free_residues, pivot_res = residues_to_perturb_complex(pep_len, root)
+
+    # Calculate residues to include in GenKIC
+    non_root_residues = get_nonroot_residues_complex(pep_len, root)
+
+    # check to make sure that our non-perturb amino acids are kept fixed (if not then remove them)
+    if fix_residues != None:
+        del_num = 0
+        for idx in range(len(free_residues)):
+            if free_residues[idx-del_num] in fix_residues:
+                del free_residues[idx-del_num]
+                del_num+=1
+
+    # init the genkic class object
+    GenKIC = genkic.GeneralizedKIC()
+    GenKIC.set_dont_fail_if_no_solution_found(True)
+    if lowest_rmsd:
+        GenKIC.set_selector_type("lowest_rmsd_selector")
+        GenKIC.set_input_pose(pose)
+    else:
+        GenKIC.set_selector_type("lowest_energy_selector")
+    GenKIC.set_closure_attempts(closure_attempts) 
+    GenKIC.set_min_solution_count(min_solutions)
+    GenKIC.set_selector_scorefunction(scorefxn)
+    if pp != None:
+        if DEBUG: print("-- PP is being applied within GENKIC ---")
+
+        # Add bb randomization for Anchor (rama prepro) if doing selection
+        if randomize_root:
+            if DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS IS ONLY DONE FOR IN SOLUTION GENERATION)")
+            if fix_residues == None:
+                randomizeBB = anchor_randomizebyrama(root)
+                pp.add_step(randomizeBB, "RandomizeRootBB", None)
+            elif root not in fix_residues:
+                randomizeBB = anchor_randomizebyrama(root)
+                pp.add_step(randomizeBB, "RandomizeRootBB", None)
+        GenKIC.set_preselection_mover(pp)
+    GenKIC.set_correct_polymer_dependent_atoms(True)
+
+    # Define our loop residues 
+    for ir in non_root_residues:
+        GenKIC.add_loop_residue(ir)
+
+    # Set our pivot points
+    GenKIC.set_pivot_atoms(
+        rsd1 = pivot_res[0],
+        at1 = "CA",
+        rsd2 = pivot_res[1],
+        at2 = "CA",
+        rsd3 = pivot_res[2],
+        at3 = "CA",
+    )
+
+    # Close the terminal end
+    firstatom = pose.residue(first_loop_res).atom_name( pose.residue(first_loop_res).lower_connect_atom() )
+    lastatom = pose.residue(pose.chain_end(chain)).atom_name( pose.residue(pose.chain_end(chain)).upper_connect_atom() )
+    GenKIC.close_bond(
+        rsd1 = pose.chain_end(chain),
+        at1 = lastatom,
+        rsd2 = first_loop_res,
+        at2 = firstatom,
+        rsd1_before = 0,
+        at1_before = "",
+        rsd2_after = 0,
+        at2_after = "",
+        bondlength = 1.32,
+        bondangle1 = 114.,# math.pi*180.0, #
+        bondangle2 = 123.,# math.pi*180.0, #
+        torsion = 180.0,
+        randomize_this_torsion = False,
+        randomize_flanking_torsions = False,
+    )
+
+    # Perturb our free residues
+    if small_perturb:
+        GenKIC.add_perturber(genkic.perturber.perturber_effect.perturb_dihedral)
+        GenKIC.add_value_to_perturber_value_list(5.0)
+        GenKIC.set_perturber_iterations(perturb_iterations)
+        for ir in free_residues:
+            atomset = rosetta.utility.vector1_core_id_NamedAtomID()
+            atomset.append(core.id.NamedAtomID("N", ir))
+            atomset.append(core.id.NamedAtomID("CA", ir))
+            GenKIC.add_atomset_to_perturber_atomset_list(atomset)
+            atomset2 = rosetta.utility.vector1_core_id_NamedAtomID()
+            atomset2.append(core.id.NamedAtomID("CA", ir))
+            atomset2.append(core.id.NamedAtomID("C", ir))
+            GenKIC.add_atomset_to_perturber_atomset_list(atomset2)
+    else:
+        GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
+        for ir in free_residues:
+            GenKIC.add_residue_to_perturber_residue_list(ir)
+#             if ir == first_loop_res: GenKIC.set_filter_attach_boinc_ghost_observer(True)
+
+    # Add a loop bump check filter
+    GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
+
+    # Add rama check filters
+    for ir in non_root_residues:
+        GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
+        GenKIC.set_filter_resnum(ir)
+        GenKIC.set_filter_rama_cutoff_energy(2)
+
+    GenKIC.apply(pose)
+    genkic_succ = GenKIC.last_run_successful()
+
+    # Clear our genkic just incase
+    GenKIC.clear_info()
+
+    return pose.clone(), genkic_succ
 
 def apply_genkic(pose: core.pose.Pose,
                  scorefxn: ScoreFunction,
@@ -1395,6 +1655,7 @@ def relax_func(
         cartesian_min: bool,
         mmf: MoveMapFactory|None = None,
         tf: TaskFactory|None = None,
+        chain: int = 1,
         keep_all_relax: bool = False,
         DEBUG: bool = False,
         ) -> int:
@@ -1452,14 +1713,14 @@ def relax_func(
         )
     else:
         final_termini = protocols.simple_moves.DeclareBond()
-        assert pose.residue(pose.chain_begin(1)).has_lower_connect(), "Residue 1 does not have a lower connect"
-        assert pose.residue(pose.chain_end(1)).has_upper_connect(), "Last Residue does not have an upper connect"
-        firstatom = pose.residue(pose.chain_begin(1)).atom_name(pose.residue(pose.chain_begin(1)).lower_connect_atom())
-        lastatom = pose.residue(pose.chain_end(1)).atom_name(pose.residue(pose.chain_end(1)).upper_connect_atom())
+        assert pose.residue(pose.chain_begin(chain)).has_lower_connect(), "Residue chain does not have a lower connect"
+        assert pose.residue(pose.chain_end(chain)).has_upper_connect(), "Last Residue does not have an upper connect"
+        firstatom = pose.residue(pose.chain_begin(chain)).atom_name(pose.residue(pose.chain_begin(chain)).lower_connect_atom())
+        lastatom = pose.residue(pose.chain_end(chain)).atom_name(pose.residue(pose.chain_end(chain)).upper_connect_atom())
         final_termini.set(
-            res1 = pose.chain_end(1),
+            res1 = pose.chain_end(chain),
             atom1 = lastatom,
-            res2 = pose.chain_begin(1),
+            res2 = pose.chain_begin(chain),
             atom2 = firstatom,
             add_termini = False,
             run_kic = False,
@@ -1563,6 +1824,7 @@ def randomize_mainchain_torsions(
         pose: core.pose.Pose,
         use_rama_prepro_for_sampling: bool = False,
         n_to_c_cyclize: bool = True,
+        residues_to_not_randomize: list[int] = [],
         ) -> int:
     """Randomize the main chain torsions by Ramachandran preference.
     Sets all omegas to 180.
@@ -1572,6 +1834,8 @@ def randomize_mainchain_torsions(
     :pose: OUr linear input pose (as this is for simple_cycpep_predict_proxy)
     :use_rama_prepro_for_sampling: Determines if our sampling is rama prepro or not
     :n_to_c_cyclize: Our input is cyclized N- to C-termini.
+    :residues_to_not_randomize: If set then passed residues are not randomized, if not then all
+        are randomized
     """
     # init our rama plots and values
     nres = pose.size()
@@ -1581,6 +1845,9 @@ def randomize_mainchain_torsions(
 
     # loop through our residues
     for ir in range(1, pose.size()+1):
+        if ir in residues_to_not_randomize:
+            print("Skipping resi %i" % ir)
+            continue
         # Check if our residue type is alpha, gamma, beta, peptoid, or oligourea
         if is_supported_restype(pose.residue_type(ir)):
             # Init our vector
@@ -1908,11 +2175,11 @@ def interface_cyclicpeptide_design(
     mmf_alone.all_bondlengths(False)
     mmf_alone.add_bb_action(
             core.select.movemap.move_map_action.mm_enable,
-            peptide_sel,
+            rs.ChainSelector(1),
             )
     mmf_alone.add_chi_action(
             core.select.movemap.move_map_action.mm_enable,
-            peptide_sel,
+            rs.ChainSelector(1),
             )
     if cartesian:
         mmf_alone.set_cartesian(True)
@@ -1958,11 +2225,41 @@ def interface_cyclicpeptide_design(
 
 #     scorefxn_score(copy_iter_pose)
     currpepscore = 9999.0
+    foundlower = False
 
     for n in range(relax_rounds):
         # First we extract our peptide out and minimize it for 1 round
-        pepscore, pepalone = generate_clean_conf(copy_iter_pose, rs.ChainSelector(peptide_chain), scorefxn_score)
+        selection_peptide_n = rs.ChainSelector(1) if ((n > 0) and (foundlower)) else rs.ChainSelector(peptide_chain)
+        pepscore, pepalone = generate_clean_conf(copy_iter_pose, selection_peptide_n, scorefxn_score)
 #         print(f"-- ROUND {n+1} pepalone seq:", pepalone.sequence())
+        mmf = MoveMapFactory()
+        mmf.all_bb(False)
+        mmf.all_chi(False)
+        mmf.all_bondangles(False)
+        mmf.all_bondlengths(False)
+        mmf.all_jumps(False)
+        mmf.add_bb_action(
+                core.select.movemap.move_map_action.mm_enable,
+                rs.ChainSelector(1 if ((n > 0) and (foundlower)) else peptide_chain),
+    #             peptide_sel,
+                )
+        mmf.add_chi_action(
+                core.select.movemap.move_map_action.mm_enable,
+    #             rs.OrResidueSelector(target_sel, peptide_sel),
+                rs.OrResidueSelector(target_sel, rs.ChainSelector(1 if ((n > 0) and (foundlower)) else peptide_chain)),
+                )
+        if cartesian:
+            mmf.set_cartesian(True)
+            mmf.add_bondangles_action(
+                    core.select.movemap.move_map_action.mm_enable,
+                    rs.ChainSelector(1 if ((n > 0) and (foundlower)) else peptide_chain),
+        #             peptide_sel,
+                    )
+            mmf.add_bondlengths_action(
+                    core.select.movemap.move_map_action.mm_enable,
+        #             rs.OrResidueSelector(target_sel, peptide_sel),
+                    rs.ChainSelector(1 if ((n > 0) and (foundlower)) else peptide_chain),
+                    )
         if n == 0:
             currpepscore = pepscore
 #         print("Peptide Alone during %i Rounds of %i has a score of: %.3f" % (n+1, relax_rounds, pepscore))
@@ -1987,7 +2284,7 @@ def interface_cyclicpeptide_design(
         new_context_pose = place_peptide_incontext(
                 pose_reference = copy_iter_pose,
                 pose_target = pep_relaxed,
-                ref_chain = 1,
+                ref_chain = 1 if ((n > 0) and (foundlower)) else peptide_chain,
                 residue_anchors = ref_residues,
                 target_start_resi = target_start_resi,
                 bb_heavy_only = True,
@@ -2013,7 +2310,7 @@ def interface_cyclicpeptide_design(
         scorefxn_score(complex_relaxed)
         complex_final_score = complex_relaxed.energies().total_energy()
 
-        final_pepscore, final_pepalone = generate_clean_conf(complex_relaxed, rs.ChainSelector(peptide_chain), scorefxn_score)
+        final_pepscore, final_pepalone = generate_clean_conf(complex_relaxed, rs.ChainSelector(1), scorefxn_score)
         print("Final Score of peptide %.3f and complex %.3f at end of Round %i of %i" % (final_pepscore, complex_final_score, n+1, relax_rounds))
         if debug: complex_relaxed.dump_pdb(f"test_iteration{n+1}_relaxed.pdb")
 
@@ -2021,6 +2318,7 @@ def interface_cyclicpeptide_design(
             print("--- Iteration %i Has a lower scoring peptide and is moving on ---" % (n+1))
             copy_iter_pose = complex_relaxed.clone()
             currpepscore = final_pepscore
+            foundlower = True
 #             print("Our new copy_iter_pose seq:", copy_iter_pose.sequence())
         else:
             print("--- Too High. Redoing ---")
