@@ -1283,6 +1283,7 @@ def apply_genkic_context(
         min_solutions: int = 1,
         fix_residues: List[int]|None = None,
         chain: int = 1,
+        root: int|None = None,
         DEBUG: bool = False,
         ) -> Tuple[core.pose.Pose, bool]:
     """
@@ -1300,6 +1301,9 @@ def apply_genkic_context(
     :small_perturb: Make small changes to the input pose (5.0 dihedrals)
     :perturb_iterations: Allows you to control the amount of iterations the perturber is applied
     :min_solutions: Number of solutions that need to be found
+    :fix_residues: Particular residues that should not be altered, generally these are motif residues
+    :chain: The peptide chain, we want to apply GenKIC too.
+    :root: If passed this is the special root of our peptide pose, and not the normal default one we set with our func.
     :DEBUG: Adds some TRACE outputs
 
     RETURNS
@@ -1308,16 +1312,17 @@ def apply_genkic_context(
     :genkic_success: Whether genkic found a solution or not
     """
     # Get the length of our pose
-    pep_len = list(range(pose.chain_begin(chain), pose.chain_end(chain)+1))
-    root = foldtree_define_complex(pep_len)
+    if root == None:
+        pep_residues = list(range(pose.chain_begin(chain), pose.chain_end(chain)+1))
+        root = foldtree_define_complex(pep_residues)
     first_loop_res = pose.chain_begin(chain) 
     
 
     # Calculate which residues to perturb and set as pivots
-    free_residues, pivot_res = residues_to_perturb_complex(pep_len, root)
+    free_residues, pivot_res = residues_to_perturb_complex(pep_residues, root)
 
     # Calculate residues to include in GenKIC
-    non_root_residues = get_nonroot_residues_complex(pep_len, root)
+    non_root_residues = get_nonroot_residues_complex(pep_residues, root)
 
     # check to make sure that our non-perturb amino acids are kept fixed (if not then remove them)
     if fix_residues != None:
