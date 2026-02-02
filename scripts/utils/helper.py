@@ -1340,17 +1340,17 @@ def apply_genkic_context(
     GenKIC.set_selector_scorefunction(scorefxn)
     if pp != None:
         if DEBUG: print("-- PP is being applied within GENKIC ---")
+        GenKIC.set_preselection_mover(pp)
 
         # Add bb randomization for Anchor (rama prepro) if doing selection
         if randomize_root:
-            if DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS IS ONLY DONE FOR IN SOLUTION GENERATION)")
+            if DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS SHOULD ONLY DONE FOR ROOTS THAT ARE NOT MOTIFS/FIXED)")
             if fix_residues == None:
                 randomizeBB = anchor_randomizebyrama(root)
-                pp.add_step(randomizeBB, "RandomizeRootBB", None)
+                randomizeBB.apply( pose )
             elif root not in fix_residues:
                 randomizeBB = anchor_randomizebyrama(root)
-                pp.add_step(randomizeBB, "RandomizeRootBB", None)
-        GenKIC.set_preselection_mover(pp)
+                randomizeBB.apply( pose )
     GenKIC.set_correct_polymer_dependent_atoms(True)
 
     # Define our loop residues 
