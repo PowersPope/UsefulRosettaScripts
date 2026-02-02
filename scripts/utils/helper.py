@@ -1312,8 +1312,8 @@ def apply_genkic_context(
     :genkic_success: Whether genkic found a solution or not
     """
     # Get the length of our pose
+    pep_residues = list(range(pose.chain_begin(chain), pose.chain_end(chain)+1))
     if root == None:
-        pep_residues = list(range(pose.chain_begin(chain), pose.chain_end(chain)+1))
         root = foldtree_define_complex(pep_residues)
     first_loop_res = pose.chain_begin(chain) 
     
