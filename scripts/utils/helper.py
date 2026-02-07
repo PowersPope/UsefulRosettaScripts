@@ -1350,10 +1350,7 @@ def apply_genkic_context(
         # Add bb randomization for Anchor (rama prepro) if doing selection
         if randomize_root:
             if DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS SHOULD ONLY DONE FOR ROOTS THAT ARE NOT MOTIFS/FIXED)")
-            if fix_residues == None:
-                randomizeBB = anchor_randomizebyrama(root)
-                randomizeBB.apply( pose )
-            elif root not in fix_residues:
+            if (fix_residues == None) or (root not in fix_residues):
                 randomizeBB = anchor_randomizebyrama(root)
                 randomizeBB.apply( pose )
     GenKIC.set_correct_polymer_dependent_atoms(True)
