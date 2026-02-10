@@ -54,6 +54,8 @@ def silentfile_process(args,
         # Fill our pose
         silentstruct_i = insf.get_structure(decoy_names[i])
         silentstruct_i.fill_pose(pose_i)
+        score = silentstruct_i.get_energy("score")
+        print("Decoy:", decoy_names[i], "Score:", score)
 
         # Iter through our other availabel structures
         for j in range(2, nstructs):
@@ -100,7 +102,7 @@ if __name__ == "__main__":
     p.add_argument("--insilent", type=str, default=None, help="path to input silentfile")
     p.add_argument("--rmsd-cutoff", type=float, default=0.3, help="How close in RMSD (A), do we want to count as something being in the same cluster.")
     p.add_argument("--peptide-chain", type=int, default=1, help="Which chain is our peptide? Needed for Oversat Filter")
-    p.add_argument("--order_by_energy", "-obe", action="store_true", help="If you scored your structural ensemble, then use this flag to do energy based clustering. \
+    p.add_argument("--order-by-energy", "-obe", action="store_true", help="If you scored your structural ensemble, then use this flag to do energy based clustering. \
             This will segfault if you did not score the outputs!")
     args = p.parse_args()
 
@@ -108,9 +110,13 @@ if __name__ == "__main__":
     init(extra_options="-mute all -in:file:fullatom true")
 
     # A silent file is passed instead
-    sf_data = silent.SilentFileData(silent.SilentFileOptions())
+    sfo = silent.SilentFileOptions()
+    sfo.in_fullatom(True)
+    sf_data = silent.SilentFileData(sfo)
     sf_data.read_file(args.insilent)
-    if args.order_by_energy: sf_data.order_by_energy()
+    if args.order_by_energy: 
+        sf_data.order_by_energy()
+        sf_data.renumber_all_decoys()
 
     # filter the outputs in our silentfile
     silentfile_process(args, sf_data)
