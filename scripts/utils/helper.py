@@ -1315,8 +1315,9 @@ def apply_genkic_context(
     pep_residues = list(range(pose.chain_begin(chain), pose.chain_end(chain)+1))
     if root == None:
         root = foldtree_define_complex(pep_residues)
+    # This is hardcoded for N-C cycles
+    cyclization_point_end, cyclization_point_start = 1, pose.chain_end(chain)
     first_loop_res = pose.chain_begin(chain) 
-    
 
     # Calculate which residues to perturb and set as pivots
     free_residues, pivot_res = residues_to_perturb_complex(pep_residues, root)
@@ -1356,8 +1357,10 @@ def apply_genkic_context(
     GenKIC.set_correct_polymer_dependent_atoms(True)
 
     # Define our loop residues 
-    for ir in non_root_residues:
-        GenKIC.add_loop_residue(ir)
+    for i in range(pivot_res[0], cyclization_point_start+1): GenKIC.add_loop_residue(i)
+    for i in range(cyclization_point_end, pivot_res[-1]+1): GenKIC.add_loop_residue(i)
+#     for ir in non_root_residues:
+#         GenKIC.add_loop_residue(ir)
 
     # Set our pivot points
     GenKIC.set_pivot_atoms(
@@ -1370,12 +1373,12 @@ def apply_genkic_context(
     )
 
     # Close the terminal end
-    firstatom = pose.residue(first_loop_res).atom_name( pose.residue(first_loop_res).lower_connect_atom() )
-    lastatom = pose.residue(pose.chain_end(chain)).atom_name( pose.residue(pose.chain_end(chain)).upper_connect_atom() )
+    firstatom = pose.residue(cyclization_point_end).atom_name( pose.residue(cyclization_point_end).lower_connect_atom() )
+    lastatom = pose.residue(cyclization_point_start).atom_name( pose.residue(cyclization_point_start).upper_connect_atom() )
     GenKIC.close_bond(
-        rsd1 = pose.chain_end(chain),
+        rsd1 = cyclization_point_start,
         at1 = lastatom,
-        rsd2 = first_loop_res,
+        rsd2 = cyclization_point_end,
         at2 = firstatom,
         rsd1_before = 0,
         at1_before = "",
@@ -1390,11 +1393,16 @@ def apply_genkic_context(
     )
 
     # Perturb our free residues
-    if small_perturb:
-        GenKIC.add_perturber(genkic.perturber.perturber_effect.perturb_dihedral)
-        GenKIC.add_value_to_perturber_value_list(5.0)
-        GenKIC.set_perturber_iterations(perturb_iterations)
-        for ir in free_residues:
+    i = root + 1
+    while i != root:
+        if i > cyclization_point_start: i = cyclization_point_end
+        if i == root:
+            i+=1
+            continue
+        if small_perturb:
+            GenKIC.add_perturber(genkic.perturber.perturber_effect.perturb_dihedral)
+            GenKIC.add_value_to_perturber_value_list( np.random.uniform(0.0, 1.0, 1) )
+            GenKIC.set_perturber_iterations(perturb_iterations)
             atomset = rosetta.utility.vector1_core_id_NamedAtomID()
             atomset.append(core.id.NamedAtomID("N", ir))
             atomset.append(core.id.NamedAtomID("CA", ir))
@@ -1403,20 +1411,27 @@ def apply_genkic_context(
             atomset2.append(core.id.NamedAtomID("CA", ir))
             atomset2.append(core.id.NamedAtomID("C", ir))
             GenKIC.add_atomset_to_perturber_atomset_list(atomset2)
-    else:
-        GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
-        for ir in free_residues:
+            i+=1
+        else:
+            GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
             GenKIC.add_residue_to_perturber_residue_list(ir)
+            i+=1
 #             if ir == first_loop_res: GenKIC.set_filter_attach_boinc_ghost_observer(True)
 
     # Add a loop bump check filter
     GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
 
     # Add rama check filters
-    for ir in non_root_residues:
+    for i in range(1, pose.chain_end(chain)+1):
+        if i != pivot_res[0] and i != pivot_res[1] and i != pivot_res[2]: continue
         GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
-        GenKIC.set_filter_resnum(ir)
+        GenKIC.set_filter_resnum(i)
         GenKIC.set_filter_rama_cutoff_energy(2)
+        if i == pivot_res[0]: GenKIC.set_filter_attach_boinc_ghost_observer(True)
+#     for ir in non_root_residues:
+#         GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
+#         GenKIC.set_filter_resnum(ir)
+#         GenKIC.set_filter_rama_cutoff_energy(2)
 
     GenKIC.apply(pose)
     genkic_succ = GenKIC.last_run_successful()
