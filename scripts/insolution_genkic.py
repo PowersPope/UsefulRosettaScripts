@@ -13,6 +13,7 @@ from utils.decorators import timeit
 
 # Rosetta imports
 from pyrosetta import init
+import pyrosetta.rosetta as rosetta
 import pyrosetta.io as io
 import pyrosetta.rosetta.numeric as numeric
 import pyrosetta.rosetta.core as core
@@ -49,15 +50,15 @@ class BackboneGeneration:
         """
         # Set up our instance of PyRosetta
         if debug:
-            init("-score:weights ref2015 -out:file:silent_struct_type binary -overwrite")
+            init("-in:file:fullatom true -out:level 2000 -score:weights ref2015 -out:file:silent_struct_type binary -overwrite")
         else:
-            init("-mute all -score:weights ref2015 -out:file:silent_struct_type binary -overwrite")
+            init("-mute all -in:file:fullatom true -score:weights ref2015 -out:file:silent_struct_type binary -overwrite")
 
         # init class global variables
         self.scorefxn = core.scoring.get_score_function(is_fullatom = True)
         self.scorefxn.set_weight(core.scoring.hbond_lr_bb, 1.0)
         self.scorefxn.set_weight(core.scoring.hbond_sr_bb, 1.0)
-        self.scorefxn.set_weight(core.scoring.coordinate_constraint, 1.0)
+#         self.scorefxn.set_weight(core.scoring.coordinate_constraint, 1.0)
         self.scorefxn.set_weight(core.scoring.atom_pair_constraint, 1.0)
         self.scorefxn.set_weight(core.scoring.dihedral_constraint, 1.0)
         self.scorefxn.set_weight(core.scoring.angle_constraint, 1.0)
@@ -65,6 +66,17 @@ class BackboneGeneration:
         emopts = core.scoring.methods.EnergyMethodOptions( self.scorefxn.energy_method_options() ) # make a copy
         emopts.hbond_options().decompose_bb_hb_into_pair_energies( True )
         self.scorefxn.set_energy_method_options( emopts )
+
+        # ParsedProtocol Scorefxns
+        self.sfxn_highhbond = self.scorefxn.clone()
+        self.sfxn_highhbond.set_weight(core.scoring.hbond_lr_bb, 10.0)
+        self.sfxn_highhbond.set_weight(core.scoring.hbond_sr_bb, 10.0)
+        # Cart Sfxn
+        self.sfxn_highhbond_cart = self.sfxn_highhbond.clone()
+        if self.sfxn_highhbond_cart.get_weight(core.scoring.cart_bonded) == 0.0:
+            self.sfxn_highhbond_cart.set_weight(core.scoring.cart_bonded, 0.5)
+            self.sfxn_highhbond_cart.set_weight(core.scoring.pro_close, 0.0)
+
 
         # randomize our root residue option
         self.randomize_root = randomize_root
@@ -74,34 +86,58 @@ class BackboneGeneration:
         self.lariat_sidechain_index = lariat_sidechain_index
 
 
-    def residues_to_perturb(self, peptide_length: int, root: int) -> List[int]:
+    def grab_pivot_anchor_and_cyclization_points(self, 
+                            pose: core.pose.Pose,
+                            thioether: bool,
+                            ) -> tuple[list[int], int, int, int]:
         """
-        Determine which residues should be perturbed, based on macrocycle size
+        Determine the pivot and root residues, this is done randomly, to allow different loops
 
         PARAMS
         ------
-        :peptide_length: Amount of amino acids in our peptide
-        :root: The root residue idx
+        :pose: Our peptide pose
+        :thioether: This is a thioether closure
 
         RETURNS
         -------
-        :perturb_residues: A list of residues that are not pivots
-        :pivote_res: A list of pivot residues
+        :pivote_res: A list of pivot residues [first, middle, last]
+        :anchor_res: The root of our peptide
+        :cyclization_point_end: The cyclization points of our peptide.
+            This is based on if it is n-c or thioether (this is generally
+            the first residue)
+        :cyclization_point_start: The cycliztion starting position
+            This is based on if it is n-c or thioether (this is generally
+            the last residue)
         """
-        # init our output
-        perturb_residues = []
-        pivot_res = []
-        # loop through our residues and get rid of +1, -1 from root
-        for ir in range(1, peptide_length+1):
-            if (ir != root+1) and (ir != root-1) and (ir != root) and (ir != peptide_length):
-                perturb_residues.append(ir)
-            elif ir != root:
-                pivot_res.append(ir)
-        # Fix Pivot RES order
-        while pivot_res[0] < root:
-            pre = pivot_res.pop(0)
-            pivot_res.append(pre)
-        return perturb_residues, pivot_res
+        # Extract out the length of our peptide
+        peptide_length = pose.total_residue()
+
+        # Setup our method
+        cyclization_point_end, cyclization_point_start = 1, peptide_length
+
+        if thioether:
+            cyclization_point_end, cyclization_point_start = self.find_first_and_last_thioether_lariat_residues(pose)
+
+        # Anchor residue range and selection
+        anchor_res_min = cyclization_point_end + 2 if thioether else 2
+        anchor_res_max = cyclization_point_start - 2 if thioether else peptide_length - 1
+        anchor_res = numeric.random.rg().random_range(anchor_res_min, anchor_res_max)
+        first_loop_res, last_loop_res = anchor_res + 1, anchor_res - 1
+
+        assert cyclization_point_end < last_loop_res
+        assert first_loop_res < cyclization_point_start
+
+        # Randomly pick a residue to be the middle pivot residue. Cant be first, anchor, or last res
+        middle_loop_res = numeric.random.rg().random_range(cyclization_point_end, cyclization_point_start-3)
+        if middle_loop_res == last_loop_res: middle_loop_res += 3
+        elif middle_loop_res == anchor_res: middle_loop_res += 2
+        elif middle_loop_res == first_loop_res: middle_loop_res += 1
+        if middle_loop_res > peptide_length: middle_loop_res -= peptide_length
+
+        # set our pivot residues
+        pivot_res = [first_loop_res, middle_loop_res, last_loop_res]
+
+        return pivot_res, anchor_res, cyclization_point_end, cyclization_point_start
 
     def get_nonroot_residues(self, peptide_length: int, root: int) -> List[int]:
         """
@@ -123,6 +159,38 @@ class BackboneGeneration:
         pre_root = [i for i in range(1, root)]
         non_root.extend(pre_root)
         return non_root
+
+    def remove_term_variants(
+            self,
+            pose: core.pose.Pose,
+            ) -> int:
+        """
+        Remove terminal variants
+
+        PARAMS
+        ------
+        :pose: Un cyclized pose
+        :upper_idx: The (1-index) residue index for the N-termini
+        :lower_idx: The (1-index) residue index for the C-termini
+        """
+        # Modify the variant types
+        modifyvariant_nterm = sm.ModifyVariantTypeMover()
+        modifyvariant_nterm.set_additional_type_to_remove("CUTPOINT_UPPER")
+        modifyvariant_nterm.set_additional_type_to_remove("LOWER_TERMINUS_VARIANT")
+        modifyvariant_nterm.set_additional_type_to_remove("ACETYLATED_NTERMINUS_VARIANT")
+        modifyvariant_nterm.set_additional_type_to_remove("ACETYLATED_NTERMINUS_CONNECTION_VARIANT")
+        modifyvariant_nterm.set_residue_selector(select.ResidueIndexSelector(1))
+        modifyvariant_nterm.apply(pose)
+
+        modifyvariant_cterm = sm.ModifyVariantTypeMover()
+        modifyvariant_cterm.set_additional_type_to_remove("CUTPOINT_LOWER")
+        modifyvariant_cterm.set_additional_type_to_remove("UPPER_TERMINUS_VARIANT")
+        modifyvariant_cterm.set_additional_type_to_remove("DIMETHYLATED_CTERMINUS_VARIANT")
+        modifyvariant_cterm.set_additional_type_to_remove("CTERM_AMIDATION")
+        modifyvariant_cterm.set_additional_type_to_remove("CTERM_CONNECT")
+        modifyvariant_cterm.set_residue_selector(select.ResidueIndexSelector(pose.total_residue()))
+        modifyvariant_cterm.apply(pose)
+        return 0
 
     def apply_hbond_filter(self, pose: io.Pose) -> Tuple[bool, int]:
         """
@@ -160,6 +228,52 @@ class BackboneGeneration:
         hbond_count = hbond_filter.report_sm(pose)
         pose.scores["bb-hbonds"] = hbond_count
         return filter_check
+    
+    def randomize_mainchain(self, pose: core.pose.Pose) -> int:
+        """Randomize the main chain torsions of our pose"""
+        print("Randomizing mainchain torsions.")
+        nres = pose.total_residue()
+        rama = core.scoring.ScoringManager.get_instance().get_Ramachandran()
+        ramaprepro = core.scoring.ScoringManager.get_instance().get_RamaPrePro()
+
+        for i in range(1, nres+1):
+            if pose.residue_type(i).is_alpha_aa() or pose.residue_type(i).is_peptoid():
+                rand_torsions = pose.residue(i).mainchain_torsions()
+                # Use a fake alanine for following_rsd for the cterm residue unless you're doing
+                # cterm cyclization and thus you can use its upper-connected residue.
+                if i == nres:
+                    following_rsd = core.chemical.ResidueTypeFinder(
+                            core.chemical.ChemicalManager.get_instance().residue_type_set("fa_standard")
+                            ).residue_base_name("ALA").get_representative_type()
+                else:
+                    following_rsd = pose.residue_type_ptr(
+                        pose.residue(i).residue_connection_partner( pose.residue(i).upper_connect().index() )
+                    )
+                ramaprepro.random_mainchain_torsions( pose.conformation(), pose.residue_type_ptr(i), following_rsd, rand_torsions )
+                covered_torsions = ramaprepro.get_mainchain_torsions_covered( pose.conformation(), pose.residue_type_ptr(i), following_rsd )
+                assert len(pose.residue(i).mainchain_torsions()) - 1 == len(rand_torsions) - 1, "This is wrong"
+                for j in range(1, len(rand_torsions)):
+                    if covered_torsions[j] == 0.0:
+                        # Copy torsion values for torsions that are not covered by the mainchain potential -- i.e. don't set these to 0.
+                        rand_torsions[j] = pose.residue(i).mainchain_torsions()[j] 
+                    else: # Using classic rama tables for sampling:
+                        if pose.residue(i).backbone_aa() != core.chemical.aa_unk:
+                            rama.random_phipsi_from_rama(pose.residue(i).backbone_aa(), rand_torsions[1], rand_torsions[2])
+                        else:
+                            rama.random_phipsi_from_rama( pose.residue_type(i).aa(), rand_torsions[1], rand_torsions[2])
+                assert len(rand_torsions) - 1 == len(pose.residue(i).mainchain_torsions()) - 1, "Wrong here"
+                for j in range(1, len(rand_torsions)): 
+                    pose.set_torsion( core.id.TorsionID( i, core.id.BB, j ), rand_torsions[j] )
+                if i!=nres: pose.set_omega(i, 180.0)
+                if pose.residue_type(i).is_oligourea(): pose.set_mu(i, 180.0);
+            else: #If this is not a recognized type:
+                for j in range(1, len(pose.residue(i).mainchain_torsions())): # Loop through all mainchain torsions.
+                    if i==nres and j==len(pose.residue(i).mainchain_torsions())-1: continue; # Skip the last mainchain torsion (not a DOF).
+                    setting = 180.0
+                    if j!=len(pose.residue(i).mainchain_torsions())-1:
+                        setting = numeric.random.rg().uniform()*360.0 - 180.0
+                    pose.set_torsion( core.id.TorsionID(i, core.id.BB, j), setting );
+        return 0
 
     def anchor_randomizebyrama(self,
                                pose: io.Pose,
@@ -187,7 +301,10 @@ class BackboneGeneration:
 
         # Setup and Update OH Mover
         if thioether:
-            pp.add_step(self.declare_thioether_bond(pose), "Update_cyclization_point_polymer_dependent1", None)
+            termini_close = protocols.simple_moves.DeclareBond()
+            termini_close_update = self.declare_thioether_bond_mover(pose, termini_close)
+            pp.add_step(termini_close_update, "Update_cyclization_point_polymer_dependent1", None)
+
         else:
             pp.add_step(self.declare_terminal_bond(pose), "Update_cyclization_point_polymer_dependent1", None)
 
@@ -198,17 +315,21 @@ class BackboneGeneration:
         pp.add_step(None, "Oversaturated_Hbond_Acceptors", oversat1)
 
         # Fast relax
-        frlx = protocols.relax.FastRelax( self.sfxn_highhbond, 3)
+        frlx = protocols.relax.FastRelax( self.sfxn_highhbond, 3 )
+        frlx.set_native_pose(pose)
         pp.add_step(frlx, "High_Hbond_FastRelax", None)
 
         # Cartesian relax
-        frlx_cart = protocols.relax.FastRelax( self.sfxn_highhbond_cart, 3)
+        frlx_cart = protocols.relax.FastRelax( self.sfxn_highhbond_cart, 3 )
         frlx_cart.minimize_bond_angles(True)
+        frlx_cart.set_native_pose(pose)
         pp.add_step(frlx_cart, "High_Hbond_FastRelax_Cartesian", None)
 
         # Update OH again
         if thioether:
-            pp.add_step(self.declare_thioether_bond(pose), "Update_cyclization_point_polymer_dependent2", None)
+            termini_close2 = protocols.simple_moves.DeclareBond()
+            termini_close2_updated = self.declare_thioether_bond_mover(pose, termini_close2)
+            pp.add_step(termini_close2_updated, "Update_cyclization_point_polymer_dependent2", None)
         else:
             pp.add_step(self.declare_terminal_bond(pose), "Update_cyclization_point_polymer_dependent2", None)
 
@@ -220,9 +341,7 @@ class BackboneGeneration:
 
         return pp
 
-    def apply_genkic(self, pose: io.Pose, thioether: bool,
-                     thioether_start_res: int, thioether_end_res: int,
-                     ) -> io.Pose:
+    def apply_genkic(self, pose: io.Pose, thioether: bool) -> io.Pose:
         """
         Apply the generalized kinematic loop closure to a pose. This will designate the appropriate
         size genkic to apply
@@ -231,26 +350,34 @@ class BackboneGeneration:
         ------
         :pose: Our input glycine pose that has been set up
         :thioether: Whether to treat the peptide as a thioether or not
-        :thioether_start_res: The starting position of our thioether bond
-            The begining (Cys)
-        :thieother_end_res: The non-cys position of our thioether bond
 
         RETURNS
         -------
         :genkic_pose: A stochastically sampled backbone given sequence RAMA preferences
         """
-        # Get the length of our pose
-        if thioether:
-            pep_len = self.find_last_disulf_res(pose)
-        else:
-            pep_len = pose.total_residue()
-        root = self.foldtree_define(pep_len)
+#         # Get the length of our pose
+#         if thioether:
+#             pep_len = self.find_last_disulf_res(pose)
+#         else:
+#             pep_len = pose.total_residue()
+#         root = self.foldtree_define(pep_len)
 
         # Calculate which residues to perturb and set as pivots
-        free_residues, pivot_res = self.residues_to_perturb(pep_len, root)
+        pivot_res, root, cyclization_point_end, cyclization_point_start = self.grab_pivot_anchor_and_cyclization_points(
+                pose, thioether,
+                )
+
+        ft = core.kinematics.FoldTree()
+        ft.clear()
+        ft.add_edge(root, 1, -1)
+        ft.add_edge(root, pose.total_residue(), -1)
+        ft.reorder(root)
+        pose.fold_tree(ft)
+
+        # free_residues, pivot_res = self.residues_to_perturb(pep_len, root, thioether)
 
         # Calculate residues to include in GenKIC
-        non_root_residues = self.get_nonroot_residues(pep_len, root)
+#         non_root_residues = self.get_nonroot_residues(pep_len, root)
 
         # setup our ParsedProtocol
         pp = self.setup_pp(pose, thioether)
@@ -260,25 +387,45 @@ class BackboneGeneration:
         GenKIC.set_closure_attempts(500)
         GenKIC.set_min_solution_count(1)
         GenKIC.set_selector_type("lowest_energy_selector")
-        GenKIC.set_selector_scorefunction(self.scorefxn)
+        GenKIC.set_selector_scorefunction(self.sfxn_highhbond)
         GenKIC.set_preselection_mover(pp)
+        GenKIC.set_correct_polymer_dependent_atoms(True)
         # Add bb randomization for Anchor (rama prepro) if doing selection
         if self.randomize_root:
             if self.DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS IS ONLY DONE FOR IN SOLUTION GENERATION)\nApplying To Pose Brefore GenKIC Closure...")
             self.anchor_randomizebyrama(pose, root)
-        for ir in non_root_residues:
-            GenKIC.add_loop_residue(ir)
 
+        #Define the loop residues
+        for i in range(pivot_res[0], cyclization_point_start+1): GenKIC.add_loop_residue(i)
+        for i in range(cyclization_point_end, pivot_res[-1]+1): GenKIC.add_loop_residue(i)
+
+        # Define tail residues
         if thioether:
-            cyclization_point_end, cyclization_point_start = self.find_first_and_last_thioether_lariat_residues(pose)
+            if cyclization_point_end > 1:
+                for i in range(cyclization_point_end-1, 0, -1): GenKIC.add_tail_residue(i)
+            if cyclization_point_start < pose.total_residue():
+                for i in range(cyclization_point_start+1, pose.total_residue()+1): GenKIC.add_tail_residue(i)
+
+        print("--Before Set Pivots--")
+        GenKIC.set_pivot_atoms(
+            rsd1 = pivot_res[0],
+            at1 = "CA",
+            rsd2 = pivot_res[1],
+            at2 = "CA",
+            rsd3 = pivot_res[2],
+            at3 = "CA",
+        )
+
+        # Add close bond logic
+        if thioether:
             GenKIC.close_bond(
                 rsd1 = cyclization_point_start,
                 at1 = pose.residue_type(cyclization_point_start).get_disulfide_atom_name(),
                 rsd2 = cyclization_point_end,
                 at2 = "CP2",
-                bondlength = protocols.cyclic_peptide.crosslinker.THIOETHER_UTIL_THIOETHER_BOND_LENGTH,
-                bondangle1 = protocols.cyclic_peptide.crosslinker.THIOETHER_UTIL_THIOETHER_BOND_N_ANGLE/rosetta.numeric.constants.d.pi*180.0,
-                bondangle2 = protocols.cyclic_peptide.crosslinker.THIOETHER_UTIL_THIOETHER_BOND_C_ANGLE/rosetta.numeric.constants.d.pi*180.0,
+                bondlength = 1.827,  # taken from protocols/cyclic_peptide/crosslinker/thioether_util.hh
+                bondangle1 = 1.960/(3.14159265358979323846264338327950288*180.0), # taken from numeric/NumericTraits.hh
+                bondangle2 = 1.781/(3.14159265358979323846264338327950288*180.0),
                 torsion = 180.,
                 rsd1_before = 0,
                 at1_before = "",
@@ -288,44 +435,48 @@ class BackboneGeneration:
                 randomize_flanking_torsions = False,
             )
             # Set the omega bond to trans
-            genkic.add_perturber( protocols.generalized_kinematic_closuer.pertruber.set_dihedral )
-            omega_vect = rosetta.utility.vector1_core_id_NamedAtomID()
-            omega_vect.append( core.id.NamedAtomID( "N", thioether_end_res) )
-            omega_vect.append( core.id.NamedAtomID( "CO", thioether_end_res) )
-            genkic.add_atomset_to_perturber_atomset_list( omega_vect )
-            genkic.add_value_to_pertuber_value_list( 180.0 )
+#             print("---Set Omega bonds to trans---")
+#             GenKIC.add_perturber( protocols.generalized_kinematic_closure.perturber.set_dihedral )
+#             omega_vect = rosetta.utility.vector1_core_id_NamedAtomID()
+#             omega_vect.append( core.id.NamedAtomID( "N", cyclization_point_end) )
+#             omega_vect.append( core.id.NamedAtomID( "CO",cyclization_point_end) )
+#             GenKIC.add_atomset_to_perturber_atomset_list( omega_vect )
+#             GenKIC.add_value_to_perturber_value_list( 180.0 )
 
             # Setup atomsets of thieother to perturb
-            genkic.add_perturber( protocols.generalized_kinematic_closuer.perturber.randomize_dihedral )
-            curtype = pose.residue_type( thioether_start_res )
+            print("---Setup Atomset of thioether to perturb---")
+            GenKIC.add_perturber( protocols.generalized_kinematic_closure.perturber.randomize_dihedral )
+            curtype = pose.residue_type( cyclization_point_start )
             first_sc_at = curtype.first_sidechain_atom()
             curat = curtype.residue_connect_atom_index( curtype.n_possible_residue_connections() ) 
             while curat != first_sc_at:
                 otherat = curtype.icoor(curat).stub_atom1().atomno()
                 sc_vect = rosetta.utility.vector1_core_id_NamedAtomID()
-                sc_vect.append( core.id.NamedAtomId( curtype.atom_name(curat), thioether_start_res ) )
-                sc_vect.append( core.id.NamedAtomId( curtype.atom_name(otherat), thioether_start_res ) )
-                genkic.add_atomset_to_pertuber_atomset_list( sc_vect )
+                sc_vect.append( core.id.NamedAtomID( curtype.atom_name(curat), cyclization_point_start ) )
+                sc_vect.append( core.id.NamedAtomID( curtype.atom_name(otherat), cyclization_point_start ) )
+                GenKIC.add_atomset_to_perturber_atomset_list( sc_vect )
                 curat = curtype.icoor(curat).stub_atom1().atomno()
 
             # Randomize backbone of upper res
-            genkic.add_perturber( protocols.generalized_kinematic_closure.perturber.randomize_dihedral )
+            print("---Ranomize Upper---")
+            GenKIC.add_perturber( protocols.generalized_kinematic_closure.perturber.randomize_dihedral )
             bb_vect = rosetta.utility.vector1_core_id_NamedAtomID()
             if curtype.is_alpha_aa() or curtype.is_oligourea() or curtype.is_peptoid() or curtype.is_beta_aa():
-                bb_vect.append ( core.id.NamedAtomID( "N", thioether_start_res ) )
-                bb_vect.append ( core.id.NamedAtomID( "CA", thioether_start_res ) )
+                bb_vect.append ( core.id.NamedAtomID( "N", cyclization_point_start ) )
+                bb_vect.append ( core.id.NamedAtomID( "CA", cyclization_point_start ) )
             elif curtype.is_gamma_aa():
-                bb_vect.append ( core.id.NamedAtomID( "N", thioether_start_res ) )
-                bb_vect.append ( core.id.NamedAtomID( "C4", thioether_start_res ) )
-            genkic.add_atomset_to_perturber_atomset_list( bb_vect )
+                bb_vect.append ( core.id.NamedAtomID( "N", cyclization_point_start ) )
+                bb_vect.append ( core.id.NamedAtomID( "C4", cyclization_point_start ) )
+            GenKIC.add_atomset_to_perturber_atomset_list( bb_vect )
 
             # Randomize Lower res backbone (Only going to make for alpha AA and peptoids at the moment)
-            genkic.add_perturber( protocols.generalized_kinematic_closure.perturber.randomize_dihedral )
-            if pose.residue_type( thioether_end_res ).is_alpha_aa() or pose.residue_type( thioether_end_res ).is_peptoid():
+            print("---Ranomize Lower---")
+            GenKIC.add_perturber( protocols.generalized_kinematic_closure.perturber.randomize_dihedral )
+            if pose.residue_type( cyclization_point_end ).is_alpha_aa() or pose.residue_type( cyclization_point_end ).is_peptoid():
                 bb_vect = rosetta.utility.vector1_core_id_NamedAtomID()
-                bb_vect.append( core.id.NamedAtomID( "CA", thioether_end_res ) )
-                bb_vect.append( core.id.NamedAtomID( "C", thioether_end_res ) )
-                genkic.add_atomset_to_perturber_atomset_list( bb_vect )
+                bb_vect.append( core.id.NamedAtomID( "CA", cyclization_point_end ) )
+                bb_vect.append( core.id.NamedAtomID( "C", cyclization_point_end ) )
+                GenKIC.add_atomset_to_perturber_atomset_list( bb_vect )
 
         else:
             GenKIC.close_bond(
@@ -344,23 +495,45 @@ class BackboneGeneration:
                 randomize_this_torsion = False,
                 randomize_flanking_torsions = False,
             )
-        GenKIC.set_pivot_atoms(
-            rsd1 = pivot_res[0],
-            at1 = "CA",
-            rsd2 = pivot_res[1],
-            at2 = "CA",
-            rsd3 = pivot_res[2],
-            at3 = "CA",
-        )
-        GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro)
-        for ir in free_residues:
-            GenKIC.add_residue_to_perturber_residue_list(ir)
-        GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
-        for ir in non_root_residues:
-            GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
-            GenKIC.set_filter_resnum(ir)
-            GenKIC.set_filter_rama_cutoff_energy(2)
+        
+        # Apply backbone pertrubing effect
+        print("---Apply backbone perturbing while loop---")
+        i = root+1
+        while i != root:
+            if i > cyclization_point_start: i = cyclization_point_end
+            if i == root: 
+                i+=1
+                continue # This is just in cae the while doesnt close
+            if thioether:
+                if i == cyclization_point_start or i == cyclization_point_end: 
+                    i+=1
+                    continue
 
+            GenKIC.add_perturber(
+                    genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro
+                    )
+            GenKIC.add_residue_to_perturber_residue_list(i)
+            i += 1
+
+        print("Root:", root)
+        print("Cyclization End:", cyclization_point_end)
+        print("Cyclization Start:", cyclization_point_start)
+        print("Pose:", pose.sequence(), "Pose Length:", pose.total_residue())
+
+        # Add bump check filter
+        GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
+
+        # Set rama check filters
+        for i in range(1, pose.total_residue()):
+            if i != pivot_res[0] and i != pivot_res[1] and i != pivot_res[2]: continue
+            if thioether:
+                if i == cyclization_point_end or i == cyclization_point_start: continue
+            GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
+            GenKIC.set_filter_resnum(i)
+            GenKIC.set_filter_rama_cutoff_energy(2)
+            if i == pivot_res[0]: GenKIC.set_filter_attach_boinc_ghost_observer(True)
+
+        print("Pose before apply:", pose.sequence(), pose.total_residue())
         GenKIC.apply(pose)
 
         return pose.clone()
@@ -412,7 +585,7 @@ class BackboneGeneration:
         :last_polymer_res: Last Polymer in pose
         """
         first_polymer_res, last_polymer_res = 0, 0
-        for ir in range(1, pose.total_residue()):
+        for ir in range(1, pose.total_residue()+1):
             if pose.residue_type(ir).is_polymer():
                 last_polymer_res = ir
                 if first_polymer_res == 0: 
@@ -421,7 +594,12 @@ class BackboneGeneration:
         return first_polymer_res, last_polymer_res
 
     def find_first_and_last_thioether_lariat_residues(self, pose: core.pose.Pose) -> tuple[int,int]:
-        """
+        """Given a pose, find the first and last thioether lariat bond-forming residues.
+
+        @details First residue is 1 by definition (chloroacetyl goes where??); last is
+        TYPICALLY C-term in the classic peptidream approach but does not have to be.
+        n.b. Suga has methods for incorporating additional cysteines into bicyclic
+        peptides, but for the moment "closest to the opposite terminus" is sufficient.
         """
         firstres = 1
         if self.lariat_sidechain_index != 0:
@@ -439,13 +617,19 @@ class BackboneGeneration:
         -------
         :cys_index: The thioether cyteien index
         """
+        print("-- Begin Pose Setup with Variant Types ---")
         firstres, lastres = self.find_first_and_last_thioether_lariat_residues(pose)
+        print("FirstRes, LastRes:", firstres, lastres)
 
         first_polymer, last_polymer = self.find_first_and_last_polymer_residues(pose)
+        print("FirstPolyer, LastPolymer:", firstres, lastres)
 
         core.pose.add_upper_terminus_type_to_pose_residue(pose, last_polymer)
         protocols.cyclic_peptide.crosslinker.set_up_thioether_variants(pose, firstres, lastres)
+        print("-- Finished Pose Setup with Variant Types ---")
+
         return lastres
+
 
     def add_cutpoints_upper_lower(self, pose: io.Pose) -> int:
         """
@@ -505,14 +689,13 @@ class BackboneGeneration:
         declarebond.apply(pose)
         return 0
 
-    def generate_initial_empty_glycine_thioether_pose(self, N: int, cysteine_position: int) -> core.pose.Pose:
+    def generate_initial_empty_glycine_thioether_pose(self, N: int) -> core.pose.Pose:
         """
         Generate a single cyclic peptide pose of glycines and a cysteine at (cysteine_position) that is of size N
 
         PARAMS
         ------
         :N (int): Desired size of input structure
-        :cysteine_position: (1-index) position of CYS in peptide
 
         RETURNS
         -------
@@ -521,19 +704,20 @@ class BackboneGeneration:
         """
         
         thio_pose = core.pose.Pose()
-        rts = core.chemical.ChemicalManger.get_instance().residue_type_set( 'fa_standard' )
+        rts = core.chemical.ChemicalManager.get_instance().residue_type_set( 'fa_standard' )
 
         # Build up Glycines depending on where cysteine is placed
-        thio_pose.append_residue_by_bond(
-                core.conformation.ResidueFactory.create_residue(rts.name_map("CYS")), 
-                True,
-                )
-        for i in range(2, N):
-           thio_pose.append_residue_by_bond(core.conformation.ResidueFactory.create_residue(rts.name_map("GLY")), True)
+        # Remember Poses are 1-index not zero
+        stubmover = protocols.cyclic_peptide.PeptideStubMover()
+        stubmover.set_reset_mode(True)
+        stubmover.reset_mover_data()
+        for i in range(1, N):
+            stubmover.add_residue( "Append", "GLY", 0, False, "", 1, 0, None, "" )
+        stubmover.add_residue( "Append", "CYS", 0, False, "", 1, 0, None, "" )
+        stubmover.apply(thio_pose)
 
-        for i in range(1, thio_pose.total_residue()):
-            if i != cysteine_position:
-                thio_pose.set_omega(i, 180.0)
+        for i in range(1, thio_pose.total_residue()+1):
+            thio_pose.set_omega(i, 180.0)
 
         # Set the fold tree
         root = self.foldtree_define(N)
@@ -543,6 +727,22 @@ class BackboneGeneration:
         ft.add_edge(root, N, -1)
         ft.reorder(root)
         thio_pose.fold_tree(ft)
+
+        core.pose.remove_variant_type_from_pose_residue(
+                thio_pose,
+                core.chemical.VariantType.UPPER_TERMINUS_VARIANT,
+                thio_pose.total_residue(),
+                )
+
+        core.pose.remove_lower_terminus_type_from_pose_residue(
+                thio_pose,
+                thio_pose.total_residue(),
+                )
+
+
+        print("--- Pose Made ---")
+        print("Seq:", thio_pose.sequence())
+        print("Seq:", thio_pose.fold_tree())
 
         return thio_pose
 
@@ -639,7 +839,32 @@ class BackboneGeneration:
             if pose.residue_type(i).is_sidechain_thiol() or pose.residue_type(i).is_disulfide_bonded():
                 return i
 
-    def declare_thioether_bond(self, pose: core.pose.Pose) -> None:
+    def declare_thioether_bond_mover(
+            self, pose: core.pose, termini_close: protocols.simple_moves.DeclareBond,
+            ) -> protocols.simple_moves.DeclareBond:
+
+        firstres, lastres = self.find_first_and_last_thioether_lariat_residues(pose)
+
+        # Get the name of the first sidechain connection atom:
+        restype = pose.residue_type( firstres )
+        ntermres_sc_connection_id = restype.n_possible_residue_connections()
+        ntermres_sc_connection_atom_index = restype.residue_connect_atom_index( ntermres_sc_connection_id )
+        ntermres_sc_connection_atom = restype.atom_name( ntermres_sc_connection_atom_index )
+
+        # Get the name of the second sidechain connection atom:
+        restype2 = pose.residue_type( lastres )
+        sidechainres_sc_connection_id = restype2.n_possible_residue_connections()
+        sidechainres_sc_connection_atom_index = restype2.residue_connect_atom_index( sidechainres_sc_connection_id )
+        sidechainres_sc_connection_atom = restype2.atom_name( sidechainres_sc_connection_atom_index )
+
+        print("Setting up thioether lariat covalent bond from " + restype.base_name() + str(firstres) + ", atom " + ntermres_sc_connection_atom + " to residue " + restype2.base_name() + str(lastres) + ", atom " + sidechainres_sc_connection_atom + "." )
+
+#         termini_close.set( sidechainres, sidechainres_sc_connection_atom, ntermres, ntermres_sc_connection_atom, false );
+        termini_close.set( lastres, sidechainres_sc_connection_atom, firstres, ntermres_sc_connection_atom, False );
+        return termini_close.clone()
+
+
+    def declare_thioether_constraints(self, pose: core.pose.Pose) -> None:
         
         """Given a pose, find the first and last thioether lariat bond-forming residues.
         First residue is 1 by definition (chloroacetyl goes where??); last is
@@ -647,18 +872,18 @@ class BackboneGeneration:
         n.b. Suga has methods for incorporating additional cysteines into bicyclic
         peptides, but for the moment "closest to the opposite terminus" is sufficient.
         """
-        n_index = 1
-        c_index = self.find_last_disulf_res(pose)
+        print("--- Declare Thioether Constraints ---")
+        n_index, c_index = self.find_first_and_last_thioether_lariat_residues(pose)
         protocols.cyclic_peptide.crosslinker.set_up_thioether_constraints(
             pose,
             n_index,
             c_index,
         )
+        print("--- Finish Thioether Constraints ---")
 
     @timeit
     def generate_ensemble(self, s: int, nstruct: int, 
                           nofilter: bool, thioether: bool,
-                          cys_position: int,
                           ) -> int:
         """
         Helper function for running full process of pose gen + genkic/filter + minimize output
@@ -670,8 +895,6 @@ class BackboneGeneration:
         :nstruct: Number of desired outputs
         :nofilter: Argparse argument for if you should filter or not based on hbonds
         :thioether: Generate thioether ensembles if passed
-        :cys_position: The position of our cysteine if we are making a lariat thioether
-            peptide.
 
         RETURNS
         -------
@@ -681,17 +904,32 @@ class BackboneGeneration:
 
         if thioether:
             # Generate our initial thioether pose
-            pose = self.generate_initial_empty_glycine_thioether_pose(s, cys_position)
-            self.set_up_terminal_thioether_lariat_variants(pose = pose)
+            pose = self.generate_initial_empty_glycine_thioether_pose(s)
+            self.thioether_sidechain_index = self.set_up_terminal_thioether_lariat_variants(pose)
+            for ir in range(1, pose.total_residue()+1):
+                print(pose.residue(ir))
 
             # Declare our thioether bond
-            self.declare_thioether_bond(pose)
+            termini = protocols.simple_moves.DeclareBond()
+            termini_updated = self.declare_thioether_bond_mover(pose, termini)
+            termini_updated.apply(pose)
+
+            # Correct virtual atoms if necessary
+            print("Thioether Sidechain Index:", self.thioether_sidechain_index)
+            if self.thioether_sidechain_index != 0:
+                protocols.cyclic_peptide.crosslinker.correct_thioether_virtuals(pose, 1, self.thioether_sidechain_index)
+                print("-- Corrected Thioether Virtuals ---")
+            # Apply thioether constraints
+            self.declare_thioether_constraints(pose)
+            pose.update_residue_neighbors()
         else:
             # Generate our initial pose
             pose = self.generate_initial_empty_glycine_pose(s)
 
             # Declare our terminal bond
             self.declare_terminal_bond(pose)
+
+        self.randomize_mainchain(pose)
 
         # Setup SilentFile Output
         opts = silent.SilentFileOptions()
@@ -710,8 +948,7 @@ class BackboneGeneration:
             # We clone our pose here, so that the bb torsion randomization is stochastic
             pre_genkic_pose = pose.clone()
             # Apply Genkic to pose and clone it
-            genkic_pose = self.apply_genkic(pre_genkic_pose, thioether,
-                                            1, cys_position)
+            genkic_pose = self.apply_genkic(pre_genkic_pose, thioether)
             # Minimize with MinMover for small energetic improvement
             self.minimize_pose(genkic_pose)
             # Calculate bb-bb hbond amount + Get True/False output
@@ -773,5 +1010,5 @@ if __name__ == "__main__":
 
     bbgen = BackboneGeneration(args.debug, args.sample_root, args.time_test, args.empty_pose_test)
     for s in args.size:
-        bbgen.generate_ensemble(s, args.nstruct, args.nofilter)
+        bbgen.generate_ensemble(s, args.nstruct, args.nofilter, args.thioether)
 
