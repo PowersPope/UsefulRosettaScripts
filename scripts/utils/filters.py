@@ -192,7 +192,7 @@ def count_nonpolar_interactions(
         apolar_res: str = "PHE,ILE,LEU,MET,PRO,THR,VAL,TRP,TYR,DPH,DIL,DLE,DME,DPR,DTH,DVA,DTR,DTY",
         threshold: int = 2,
         filtername: str = "interface_hydrophobic_filter",
-        ) -> Tuple[Union[bool,float]]:
+        ) -> tuple[bool,float]:
     """Count the number of interactions between two selections
 
     PARAMS
@@ -265,7 +265,7 @@ def count_polar_interactions(
 
 def count_hbondset_across_interface( pose: core.pose.Pose, 
                                     debug: bool = False,
-                                    ) -> Tuple[int, dict[str,int]]:
+                                    ) -> tuple[int, dict[str,int]]:
     """Using HBondSet count the number of hbonds across the interface
     of a protein-peptide complex (can work for protein-protein complex too). 
     This function assumes the pose being passed only has two chains and one interface.
