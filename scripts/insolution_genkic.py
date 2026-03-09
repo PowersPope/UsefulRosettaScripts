@@ -689,13 +689,20 @@ class BackboneGeneration:
         declarebond.apply(pose)
         return 0
 
-    def generate_initial_empty_glycine_thioether_pose(self, N: int) -> core.pose.Pose:
+    def generate_initial_empty_glycine_thioether_pose(self, N: int, 
+                                                      homochiral: bool,
+                                                      stub_homochiral: bool,
+                                                      ) -> core.pose.Pose:
         """
         Generate a single cyclic peptide pose of glycines and a cysteine at (cysteine_position) that is of size N
 
         PARAMS
         ------
         :N (int): Desired size of input structure
+        :homochiral: Determine if we are making poly-alanine or poly-glycine
+        :stub_homochiral:
+            True -> first residue is Ala (We want an all L-chiral peptide)
+            False -> first residue is Gly (can take any chirality)
 
         RETURNS
         -------
@@ -712,7 +719,16 @@ class BackboneGeneration:
         stubmover.set_reset_mode(True)
         stubmover.reset_mover_data()
         for i in range(1, N):
-            stubmover.add_residue( "Append", "GLY", 0, False, "", 1, 0, None, "" )
+            if i == 1:
+                if stub_homochiral:
+                    stubmover.add_residue( "Append", "ALA", 0, False, "", 1, 0, None, "" )
+                else:
+                    stubmover.add_residue( "Append", "GLY", 0, False, "", 1, 0, None, "" )
+            else:
+                if homochiral:
+                    stubmover.add_residue( "Append", "ALA", 0, False, "", 1, 0, None, "" )
+                else:
+                    stubmover.add_residue( "Append", "GLY", 0, False, "", 1, 0, None, "" )
         stubmover.add_residue( "Append", "CYS", 0, False, "", 1, 0, None, "" )
         stubmover.apply(thio_pose)
 
@@ -746,13 +762,16 @@ class BackboneGeneration:
 
         return thio_pose
 
-    def generate_initial_empty_glycine_pose(self, N: int) -> core.pose.Pose:
+    def generate_initial_empty_glycine_pose(self, N: int,
+                                            homochiral: bool,
+                                            ) -> core.pose.Pose:
         """
         Generate a single cyclic peptide pose of glycines that is of size N
 
         PARAMS
         ------
         :N (int): Desired size of input structure
+        :homochiral: Determines if the peptide is all Alanines (true) or glycines (false)
 
         RETURNS
         -------
@@ -771,7 +790,7 @@ class BackboneGeneration:
             flip_trans_omegabonds(gly_pose, N)
         else:
             gly_pose = io.pose_from_sequence(
-                seq="G"*N,
+                seq="A"*N if homochiral else "G"*N,
                 res_type="fa_standard",
                 auto_termini=False,
             )
@@ -884,6 +903,8 @@ class BackboneGeneration:
     @timeit
     def generate_ensemble(self, s: int, nstruct: int, 
                           nofilter: bool, thioether: bool,
+                          homochiral: bool,
+                          thioether_chloroacetyl_homochiral: bool,
                           ) -> int:
         """
         Helper function for running full process of pose gen + genkic/filter + minimize output
@@ -904,10 +925,10 @@ class BackboneGeneration:
 
         if thioether:
             # Generate our initial thioether pose
-            pose = self.generate_initial_empty_glycine_thioether_pose(s)
+            pose = self.generate_initial_empty_glycine_thioether_pose(
+                    s, homochiral, thioether_chloroacetyl_homochiral,
+                    )
             self.thioether_sidechain_index = self.set_up_terminal_thioether_lariat_variants(pose)
-            for ir in range(1, pose.total_residue()+1):
-                print(pose.residue(ir))
 
             # Declare our thioether bond
             termini = protocols.simple_moves.DeclareBond()
@@ -924,7 +945,7 @@ class BackboneGeneration:
             pose.update_residue_neighbors()
         else:
             # Generate our initial pose
-            pose = self.generate_initial_empty_glycine_pose(s)
+            pose = self.generate_initial_empty_glycine_pose(s, homochiral)
 
             # Declare our terminal bond
             self.declare_terminal_bond(pose)
@@ -1006,9 +1027,15 @@ if __name__ == "__main__":
             as it will make the process slower.")
     p.add_argument("--empty-pose-test", action="store_true", help="Run an empty pose test, since this is more representative of the XML script")
     p.add_argument("--thioether", action="store_true", help="Generate Thioether Cyclic Peptides")
+    p.add_argument("--homochiral", action="store_true", help="This makes an all alanine peptide, as we want the peptide to be of the same chirality.")
+    p.add_argument("--thioether-chloroacetyl-homochiral", action="store_true", help="This makes the choloracetyl residue be an alanine. \
+            if not passed then it is a glycine.")
     args = p.parse_args()
 
     bbgen = BackboneGeneration(args.debug, args.sample_root, args.time_test, args.empty_pose_test)
     for s in args.size:
-        bbgen.generate_ensemble(s, args.nstruct, args.nofilter, args.thioether)
+#         bbgen.generate_ensemble(s, args.nstruct, args.nofilter, args.thioether)
+        args_dict = vars(args)
+        print(args_dict)
+        bbgen.generate_ensemble(s=s, **args_dict)
 
