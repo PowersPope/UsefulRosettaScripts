@@ -1357,8 +1357,15 @@ def apply_genkic_context(
     GenKIC.set_correct_polymer_dependent_atoms(True)
 
     # Define our loop residues 
-    for i in range(pivot_res[0], cyclization_point_start+1): GenKIC.add_loop_residue(i)
-    for i in range(cyclization_point_end, pivot_res[-1]+1): GenKIC.add_loop_residue(i)
+    print()
+    print("Adding loop residues:")
+    for i in range(pivot_res[0], cyclization_point_start+1): 
+        print(i)
+        GenKIC.add_loop_residue(i)
+    for i in range(cyclization_point_end, pivot_res[-1]+1): 
+        print(i)
+        GenKIC.add_loop_residue(i)
+    print()
 #     for ir in non_root_residues:
 #         GenKIC.add_loop_residue(ir)
 
@@ -1394,28 +1401,34 @@ def apply_genkic_context(
 
     # Perturb our free residues
     i = root + 1
+    print("Before while loop")
     while i != root:
-        if i > cyclization_point_start: i = cyclization_point_end
+        print("i:", i)
+        if i > cyclization_point_start: 
+            print("change i to be cyclization_point_end")
+            i = cyclization_point_end
         if i == root:
+            print("In root")
             i+=1
             continue
         if small_perturb:
+            print("Small Small Perturb, Resi:", i)
             GenKIC.add_perturber(genkic.perturber.perturber_effect.perturb_dihedral)
-            GenKIC.add_value_to_perturber_value_list( np.random.uniform(0.0, 1.0, 1) )
+            GenKIC.add_value_to_perturber_value_list( 1 )
             GenKIC.set_perturber_iterations(perturb_iterations)
             atomset = rosetta.utility.vector1_core_id_NamedAtomID()
-            atomset.append(core.id.NamedAtomID("N", ir))
-            atomset.append(core.id.NamedAtomID("CA", ir))
+            atomset.append(core.id.NamedAtomID("N", i))
+            atomset.append(core.id.NamedAtomID("CA", i))
             GenKIC.add_atomset_to_perturber_atomset_list(atomset)
             atomset2 = rosetta.utility.vector1_core_id_NamedAtomID()
-            atomset2.append(core.id.NamedAtomID("CA", ir))
-            atomset2.append(core.id.NamedAtomID("C", ir))
+            atomset2.append(core.id.NamedAtomID("CA", i))
+            atomset2.append(core.id.NamedAtomID("C", i))
             GenKIC.add_atomset_to_perturber_atomset_list(atomset2)
-            i+=1
+            print("End Small Perturb, Resi:", i)
         else:
             GenKIC.add_perturber(genkic.perturber.perturber_effect.randomize_backbone_by_rama_prepro) 
-            GenKIC.add_residue_to_perturber_residue_list(ir)
-            i+=1
+            GenKIC.add_residue_to_perturber_residue_list(i)
+        i+=1
 #             if ir == first_loop_res: GenKIC.set_filter_attach_boinc_ghost_observer(True)
 
     # Add a loop bump check filter
