@@ -58,9 +58,9 @@ class BackboneGeneration:
         # Set up our instance of PyRosetta
         if debug:
 #             init("-in:file:fullatom true -out:level 2000 -score:weights ref2015 -out:file:silent_struct_type binary -overwrite")
-            init("-in:file:fullatom true -score:weights ref2015 -out:file:silent_struct_type binary -overwrite")
+            init("-in:file:fullatom true -score:weights ref2015 -out:file:silent_struct_type binary -overwrite -precompute_ig")
         else:
-            init("-mute all -in:file:fullatom true -score:weights ref2015 -out:file:silent_struct_type binary -overwrite")
+            init("-mute all -in:file:fullatom true -score:weights ref2015 -out:file:silent_struct_type binary -overwrite -precompute_ig")
 
         # init class global variables
         self.scorefxn = core.scoring.get_score_function(is_fullatom = True)
@@ -563,6 +563,9 @@ class BackboneGeneration:
         GenKIC.apply(pose)
         genkic_succ = GenKIC.last_run_successful()
 
+        # Clear our genkic just incase
+        GenKIC.clear_info()
+
         return genkic_succ
 
     def declare_terminal_bond_mover(self, pose: io.Pose, termini: sm.DeclareBond) -> int:
@@ -1005,7 +1008,7 @@ class BackboneGeneration:
             genkic_pose = pose.clone()
             # Apply Genkic to pose and clone it
             genkic_succ = self.apply_genkic(genkic_pose)
-            print("Genkic success:", genkic_succ, "Number of Success:", success)
+#             print("Genkic success:", genkic_succ, "Number of Success:", success)
             if not genkic_succ:
                 continue
             # Minimize with MinMover for small energetic improvement
