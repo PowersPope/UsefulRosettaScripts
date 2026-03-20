@@ -8,6 +8,7 @@ import pyrosetta
 import pyrosetta.io as io
 import pyrosetta.rosetta as rosetta
 import pyrosetta.rosetta.core as core
+import pyrosetta.rosetta.numeric as numeric
 import pyrosetta.rosetta.core.select.residue_selector as rs
 import pyrosetta.rosetta.protocols.simple_moves as sm
 import pyrosetta.rosetta.protocols.generalized_kinematic_closure as genkic
@@ -26,11 +27,9 @@ from pyrosetta.rosetta.core.select.residue_selector import ResidueSelector
 
 
 # python imports
-import os, sys
-import math
+import os
 import portalocker
 import time
-import random
 from typing import Union, List, Tuple
 
 # filter funcstions
@@ -1271,6 +1270,63 @@ def anchor_randomizebyrama(
     )
     return randomizeBB.clone()
 
+def grab_pivot_anchor_and_cyclization_points(
+                        pose: core.pose.Pose,
+                        anchor_res: int|None = None,
+                        thioether: bool,
+                        ) -> tuple[list[int], int, int, int]:
+    """
+    Determine the pivot and root residues, this is done randomly, to allow different loops
+
+    PARAMS
+    ------
+    :pose: Our peptide pose
+    :anchor_res: Do we want to randomize the backbone or not?
+    :thioether: True the peptide is thioether / False the peptide is N-C
+
+    RETURNS
+    -------
+    :pivote_res: A list of pivot residues [first, middle, last]
+    :anchor_res: The root of our peptide
+    :cyclization_point_end: The cyclization points of our peptide.
+        This is based on if it is n-c or thioether (this is generally
+        the first residue)
+    :cyclization_point_start: The cycliztion starting position
+        This is based on if it is n-c or thioether (this is generally
+        the last residue)
+    """
+    # Extract out the length of our peptide
+    peptide_length = pose.total_residue()
+
+    # Setup our method
+    cyclization_point_end, cyclization_point_start = 1, peptide_length
+
+    if thioether:
+        raise ValueError("In this current version thioether is not setup.") 
+#         cyclization_point_end, cyclization_point_start = find_first_and_last_thioether_lariat_residues(pose)
+
+    # Anchor residue range and selection
+    if isinstance(anchor_res, None):
+        anchor_res_min = cyclization_point_end + 2 if thioether else 3
+        anchor_res_max = cyclization_point_start - 2 if thioether else peptide_length - 2
+        anchor_res = numeric.random.rg().random_range(anchor_res_min, anchor_res_max)
+    first_loop_res, last_loop_res = anchor_res + 1, anchor_res - 1
+
+    assert cyclization_point_end < last_loop_res
+    assert first_loop_res < cyclization_point_start
+
+    # Randomly pick a residue to be the middle pivot residue. Cant be first, anchor, or last res
+    middle_loop_res = numeric.random.rg().random_range(cyclization_point_end, cyclization_point_start-3)
+    if middle_loop_res == last_loop_res: middle_loop_res += 3
+    elif middle_loop_res == anchor_res: middle_loop_res += 2
+    elif middle_loop_res == first_loop_res: middle_loop_res += 1
+    if middle_loop_res > peptide_length: middle_loop_res -= peptide_length
+
+    # set our pivot residues
+    pivot_res = [first_loop_res, middle_loop_res, last_loop_res]
+
+    return pivot_res, anchor_res, cyclization_point_end, cyclization_point_start
+
 def apply_genkic_context(
         pose: core.pose.Pose,
         scorefxn: ScoreFunction,
@@ -1313,25 +1369,29 @@ def apply_genkic_context(
     """
     # Get the length of our pose
     pep_residues = list(range(pose.chain_begin(chain), pose.chain_end(chain)+1))
-    if root == None:
+    if isinstance(root, None):
         root = foldtree_define_complex(pep_residues)
     # This is hardcoded for N-C cycles
     cyclization_point_end, cyclization_point_start = 1, pose.chain_end(chain)
-    first_loop_res = pose.chain_begin(chain) 
 
     # Calculate which residues to perturb and set as pivots
-    free_residues, pivot_res = residues_to_perturb_complex(pep_residues, root)
+    pivot_res, root, pivot_res, cyclization_point_end, cyclization_point_start = grab_pivot_anchor_and_cyclization_points(
+            pose = pose, 
+            anchor_res = root, 
+            thioether = False,
+            ) 
+#     free_residues, pivot_res = residues_to_perturb_complex(pep_residues, root)
 
     # Calculate residues to include in GenKIC
-    non_root_residues = get_nonroot_residues_complex(pep_residues, root)
+#     non_root_residues = get_nonroot_residues_complex(pep_residues, root)
 
     # check to make sure that our non-perturb amino acids are kept fixed (if not then remove them)
-    if fix_residues != None:
-        del_num = 0
-        for idx in range(len(free_residues)):
-            if free_residues[idx-del_num] in fix_residues:
-                del free_residues[idx-del_num]
-                del_num+=1
+#     if fix_residues != None:
+#         del_num = 0
+#         for idx in range(len(free_residues)):
+#             if free_residues[idx-del_num] in fix_residues:
+#                 del free_residues[idx-del_num]
+#                 del_num+=1
 
     # init the genkic class object
     GenKIC = genkic.GeneralizedKIC()
@@ -1344,14 +1404,15 @@ def apply_genkic_context(
     GenKIC.set_closure_attempts(closure_attempts) 
     GenKIC.set_min_solution_count(min_solutions)
     GenKIC.set_selector_scorefunction(scorefxn)
-    if pp != None:
+    GenKIC.set_correct_polymer_dependent_atoms(True)
+    if not isinstance(pp, None):
         if DEBUG: print("-- PP is being applied within GENKIC ---")
         GenKIC.set_preselection_mover(pp)
 
         # Add bb randomization for Anchor (rama prepro) if doing selection
         if randomize_root:
             if DEBUG: print("RANDOMIZE ROOT RESIDUE (THIS SHOULD ONLY DONE FOR ROOTS THAT ARE NOT MOTIFS/FIXED)")
-            if (fix_residues == None) or (root not in fix_residues):
+            if isinstance(fix_residues, None) or (root not in fix_residues):
                 randomizeBB = anchor_randomizebyrama(root)
                 randomizeBB.apply( pose )
     GenKIC.set_correct_polymer_dependent_atoms(True)
@@ -1405,7 +1466,7 @@ def apply_genkic_context(
             continue
         if small_perturb:
             GenKIC.add_perturber(genkic.perturber.perturber_effect.perturb_dihedral)
-            GenKIC.add_value_to_perturber_value_list( 1 )
+            GenKIC.add_value_to_perturber_value_list( 1.0 )
             GenKIC.set_perturber_iterations(perturb_iterations)
             atomset = rosetta.utility.vector1_core_id_NamedAtomID()
             atomset.append(core.id.NamedAtomID("N", i))
@@ -1425,7 +1486,7 @@ def apply_genkic_context(
     GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
 
     # Add rama check filters
-    for i in range(1, pose.chain_end(chain)+1):
+    for i in range(pose.chain_begin(chain), pose.chain_end(chain)):
         if i != pivot_res[0] and i != pivot_res[1] and i != pivot_res[2]: continue
         GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
         GenKIC.set_filter_resnum(i)
