@@ -30,40 +30,39 @@ def silentfile_process(args,
     :args: The args from our argparse
     :insf: Our passed in SilentDataFile with our structures
     """
-    decoy_names = insf.tags()
-    nstructs = len(decoy_names)
-    rmsd_check_list = np.zeros(nstructs, dtype=np.int32)
+    structure_list = list(insf.structure_list())
+    decoy_names = list(insf.tags())
     cluster_map = dict()
-
-    # list RMSD
-#     rmsd_matrix = np.zeros((nstructs, nstructs), dtype=np.float32)
-    skip_scaffolds = list()
 
     # take a pose (i) and (j) 
     pose_i = core.pose.Pose()
     pose_j = core.pose.Pose()
-    for i in range(1, nstructs):
-        # Init our vec and list for tracking this round
-        if i in skip_scaffolds: continue
-        rmsd_vec = np.zeros(nstructs - len(skip_scaffolds) - 2, dtype=np.float32)
+
+    # Track variables
+    cluster_count = 0
+    entry_left = True
+    while entry_left:
         scaffolds_accumulated = list()  
-        skip_scaffolds.append(i)
+        scaffold_names = list()
         scaffold_count = -1
         pose_i.clear()
 
         # Fill our pose
-        silentstruct_i = insf.get_structure(decoy_names[i])
+        silentstruct_i = structure_list.pop(0)
+        name = decoy_names.pop(0)
         silentstruct_i.fill_pose(pose_i)
         score = silentstruct_i.get_energy("score")
-        print("Decoy:", decoy_names[i], "Score:", score)
+        print("Decoy:", name, "Score:", score)
 
+        cluster_count += 1
+        if args.output_cluster_centers:
+            pose_i.dump_pdb(f"{name}-clustercenter-{cluster_count}.pdb")
+
+        rmsd_count = np.zeros(1, dtype=np.float32)
         # Iter through our other availabel structures
-        for j in range(2, nstructs):
-            if j in skip_scaffolds: continue
-            scaffold_count += 1
-
-            # init empty poses
-            silentstruct_j = insf.get_structure(decoy_names[j])
+        while structure_list:
+            silentstruct_j = structure_list.pop(0)
+            j_name = decoy_names.pop(0)
             silentstruct_j.fill_pose(pose_j)
 
             # Grab the Atom Map to compute RMSD
@@ -81,14 +80,16 @@ def silentfile_process(args,
                     pose_i,
                     bb_heavy_atommap,
                     )
-            rmsd_vec[scaffold_count] = rmsd_value
-#             rmsd_matrix[i-1, j-1] = rmsd_value
-#             rmsd_matrix[j-1, i-1] = rmsd_value
-            scaffolds_accumulated.append(j)
+            if rmsd_value > args.rmsd_cutoff:
+                scaffolds_accumulated.append(silentstruct_j)
+                scaffold_names.append(j_name)
+            else:
+                rmsd_count += 1
             pose_j.clear()
-        rmsd_check = rmsd_vec <= args.rmsd_cutoff
-        cluster_map[decoy_names[i]] = rmsd_check.sum()
-        skip_scaffolds.extend(np.array(scaffolds_accumulated)[rmsd_check].tolist())
+
+        cluster_map[cluster_count] = rmsd_count
+        structure_list = scaffolds_accumulated
+        decoy_names = scaffold_names
 
     print(f"RMSD Dict of Matches <= {args.rmsd_cutoff}:")
     print(cluster_map)
@@ -104,6 +105,7 @@ if __name__ == "__main__":
     p.add_argument("--peptide-chain", type=int, default=1, help="Which chain is our peptide? Needed for Oversat Filter")
     p.add_argument("--order-by-energy", "-obe", action="store_true", help="If you scored your structural ensemble, then use this flag to do energy based clustering. \
             This will segfault if you did not score the outputs!")
+    p.add_argument("--output-cluster-centers", action="store_true", help="Output the cluster centers in pdbs, so that you can visualize the peptides.")
     args = p.parse_args()
 
     # Setup our initial Rosetta instance with our presets
@@ -116,7 +118,7 @@ if __name__ == "__main__":
     sf_data.read_file(args.insilent)
     if args.order_by_energy: 
         sf_data.order_by_energy()
-        sf_data.renumber_all_decoys()
+#         sf_data.renumber_all_decoys()
 
     # filter the outputs in our silentfile
     silentfile_process(args, sf_data)
