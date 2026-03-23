@@ -79,11 +79,8 @@ def main() -> int:
 
     np.save(os.path.join(args.output_path,phi_psi_file), phi_psi)
 
-            
-
-
-
-
-
-
     return 0
+
+
+if __name__ == "__main__":
+    main()
