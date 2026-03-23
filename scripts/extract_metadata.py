@@ -35,7 +35,7 @@ def main() -> int:
     args = p.parse_args()
 
     # init rosetta
-    init("-mute all -score:weights ref2015 -overwite -in:file:fullatom true")
+    init("-mute all -score:weights ref2015 -in:file:fullatom true")
 
     # A silent file is passed
     sfo = silent.SilentFileOptions()
@@ -51,7 +51,7 @@ def main() -> int:
     phi_psi_file = f"{args.outfile_prefix}-phi-psi.npy"
 
     # Array
-    phi_psi = np.zeros( (len(tags), args.pep_size, 2), dtype=np.float)
+    phi_psi = np.zeros( (len(tags), args.pep_size, 2), dtype=np.float32)
 
     # Iter through our tags
     for i, tag in enumerate(tags):
