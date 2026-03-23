@@ -77,7 +77,7 @@ def main() -> int:
             phi_psi[i, ir-1, 0] = pose.phi(ir)
             phi_psi[i, ir-1, 1] = pose.psi(ir)
 
-    np.save(phi_psi_file, phi_psi)
+    np.save(os.path.join(args.output_path,phi_psi_file), phi_psi)
 
             
 
