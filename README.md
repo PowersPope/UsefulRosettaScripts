@@ -1,17 +1,20 @@
 # UsefulRosettaScripts
 
-This repository will be a place where I will place all of the moduluar scripts that I have made during my time working with Rosetta/PyRosetta during my PhD.
-Anyone is allowed to use them. Please let me know if you have an ideas on changes or improvements in the scripts. I don't promise that I will be able to accomodate,
-but I can try my best!
+A bunch of PyRosetta scripts that I have made for cyclic peptides over the course of my PhD.
+Anyone is allowed to use them. 
+Please let me know if you have any questions, though I will try my best to make the scripts self explanatory. 
 
 
 ## Repo Layout
 
 - `scripts/` will house all of the `.py` or `.xml` scripts.
+- `scripts/utils/` will house utility Rosetta functions and filters that can be used on their own.
+    Additionally, they will be used in some scripts found in `scripts/` as well.
 - `examples/` will house all of the simple example use cases for the scripts. (Though this will be added later.)
 
 
 ## Current Scripts
+(This is old and needs to be updated, but I don't have the time at the moment! Yay for dissertation writing!)
 
 - `calculate_ddg.py`: This can be used for a some calculating the ddG of binding on some dimeric complex. I 
 it to handle my Cyclic Peptide designs, but I made that a flag and should work for general peptides and proteins as well.
@@ -58,3 +61,7 @@ optional arguments:
                         slower. (default: False)
 ```
 
+## Author
+Andrew Powers - Hosseinzadeh Lab, University of Oregon
+
+Email: apowers4@uoregon.edu
