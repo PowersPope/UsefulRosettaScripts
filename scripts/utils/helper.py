@@ -608,13 +608,10 @@ def place_peptide_incontext(
             ref_pose.chain_begin(ref_chain),
             ref_pose.chain_end(ref_chain),
             )
+    ref_pose.update_residue_neighbors()
 
     # Now combine the two poses
-    core.pose.append_pose_to_pose(
-            pose_target,
-            ref_pose,
-            new_chain = True,
-            )
+    pose_target.append_pose_by_jump(ref_pose, jump_anchor_residue=1)
 
     pose_target.update_residue_neighbors()
 
@@ -623,9 +620,6 @@ def place_peptide_incontext(
     # https://forum.rosettacommons.org/node/3932
     pose_target.conformation().detect_disulfides()
 
-    ft_peptide.add_edge(pose_target.chain_end(1), pose_target.chain_begin(2), 1)
-    ft_peptide.add_edge(pose_target.chain_begin(2), pose_target.chain_end(2), -1)
-    pose_target.fold_tree(ft_peptide)
     return pose_target.clone()
 
 
