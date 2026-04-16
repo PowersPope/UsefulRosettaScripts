@@ -1034,7 +1034,7 @@ class BackboneGeneration:
             else:
                 out_name = f"genkicbb_size{s}_{datetime.date.today().strftime('%m%d%Y')}_timetest.silent"
         elif self.thioether:
-            out_name = f"genkicbb_thioether_size{s}_{datetime.date.today().strftime('%m%d%Y')}_timetest.silent"
+            out_name = f"genkicbb_thioether_size{s}_{datetime.date.today().strftime('%m%d%Y')}.silent"
         else:
             out_name = f"genkicbb_size{s}_{datetime.date.today().strftime('%m%d%Y')}.silent"
 
@@ -1116,10 +1116,17 @@ if __name__ == "__main__":
     p.add_argument("--lariat-sidechain-index", type=int, default=0, help="Setup a special placement for the lariat n-c positions")
     args = p.parse_args()
 
-    bbgen = BackboneGeneration(args.debug, args.sample_root, args.time_test, args.empty_pose_test,
-                               args.thioether, args.homochiral, args.thioether_chloroacetyl_homochiral,
-                               args.lariat_sidechain_index,
-                               )
+    bbgen = BackboneGeneration(
+            debug = args.debug, 
+            randomize_root = args.sample_root, 
+            time_test = args.time_test, 
+            empty_pose_test = args.empty_pose_test,
+            thioether = args.thioether, 
+            homochiral = args.homochiral, 
+            thioether_chloroacetyl_homochiral = args.thioether_chloroacetyl_homochiral,
+            thioether_chloroacetyl_dchiral = args.thioether_chloroacetyl_dchiral,
+            lariat_sidechain_index = args.lariat_sidechain_index,
+            )
     for s in args.size:
         bbgen.generate_ensemble(s, args.nstruct, args.nofilter)
 
