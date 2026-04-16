@@ -1276,6 +1276,7 @@ def grab_pivot_anchor_and_cyclization_points(
     PARAMS
     ------
     :pose: Our peptide pose
+    :chain: The chain of interest
     :anchor_res: Do we want to randomize the backbone or not?
     :thioether: True the peptide is thioether / False the peptide is N-C
 
