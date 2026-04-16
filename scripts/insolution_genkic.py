@@ -241,52 +241,86 @@ class BackboneGeneration:
         hbond_count = hbond_filter.report_sm(pose)
         pose.scores["bb-hbonds"] = hbond_count
         return filter_check
-    
-    def randomize_mainchain(self, pose: core.pose.Pose) -> int:
+
+    def randomize_mainchain(self, pose: core.pose.Pose, n_to_c_cyclize: bool) -> int:
         """Randomize the main chain torsions of our pose"""
-        self.debug: print("Randomizing mainchain torsions.")
+        self.debug: print("---Randomizing mainchain torsions.---")
         nres = pose.total_residue()
         rama = core.scoring.ScoringManager.get_instance().get_Ramachandran()
         ramaprepro = core.scoring.ScoringManager.get_instance().get_RamaPrePro()
 
         for i in range(1, nres+1):
             if pose.residue_type(i).is_alpha_aa() or pose.residue_type(i).is_peptoid():
-                rand_torsions = pose.residue(i).mainchain_torsions()
+                # Extract out the correct number of torsions vector1_double
+                rand_torsions = rosetta.utility.vector1_double(len(pose.residue(i).mainchain_torsions()) - 1)
                 # Use a fake alanine for following_rsd for the cterm residue unless you're doing
                 # cterm cyclization and thus you can use its upper-connected residue.
-                if i == nres:
+                if i == nres and not n_to_c_cyclize:
                     following_rsd = core.chemical.ResidueTypeFinder(
                             core.chemical.ChemicalManager.get_instance().residue_type_set("fa_standard")
                             ).residue_base_name("ALA").get_representative_type()
                 else:
-                    following_rsd = pose.residue_type_ptr(
-                        pose.residue(i).residue_connection_partner( pose.residue(i).upper_connect().index() )
-                    )
-                ramaprepro.random_mainchain_torsions( pose.conformation(), pose.residue_type_ptr(i), following_rsd, rand_torsions )
-                covered_torsions = ramaprepro.get_mainchain_torsions_covered( pose.conformation(), pose.residue_type_ptr(i), following_rsd )
-                assert len(pose.residue(i).mainchain_torsions()) - 1 == len(rand_torsions) - 1, "This is wrong"
-                for j in range(1, len(rand_torsions)):
-                    if covered_torsions[j] == 0.0:
-                        # Copy torsion values for torsions that are not covered by the mainchain potential -- i.e. don't set these to 0.
-                        rand_torsions[j] = pose.residue(i).mainchain_torsions()[j] 
-                    else: # Using classic rama tables for sampling:
-                        if pose.residue(i).backbone_aa() != core.chemical.aa_unk:
-                            rama.random_phipsi_from_rama(pose.residue(i).backbone_aa(), rand_torsions[1], rand_torsions[2])
-                        else:
-                            rama.random_phipsi_from_rama( pose.residue_type(i).aa(), rand_torsions[1], rand_torsions[2])
-                assert len(rand_torsions) - 1 == len(pose.residue(i).mainchain_torsions()) - 1, "Wrong here"
-                for j in range(1, len(rand_torsions)): 
-                    pose.set_torsion( core.id.TorsionID( i, core.id.BB, j ), rand_torsions[j] )
+                    following_rsd = pose.residue_type(pose.residue(i).residue_connection_partner(
+                        pose.residue(i).upper_connect().index()
+                        ))
+                # torsion values based on the ramaprepro (preferenced by pose conf, resi, and resi+1)
+                ramaprepro.random_mainchain_torsions( 
+                                                     pose.conformation(), 
+                                                     pose.residue_type(i), 
+                                                     following_rsd, 
+                                                     rand_torsions,
+                                                     )
+                for j in range(1, len(rand_torsions)+1): 
+                    pose.set_torsion( core.id.TorsionID( i, core.id.TorsionType.BB, j ), rand_torsions[j] )
                 if i!=nres: pose.set_omega(i, 180.0)
-                if pose.residue_type(i).is_oligourea(): pose.set_mu(i, 180.0);
-            else: #If this is not a recognized type:
-                for j in range(1, len(pose.residue(i).mainchain_torsions())): # Loop through all mainchain torsions.
-                    if i==nres and j==len(pose.residue(i).mainchain_torsions())-1: continue; # Skip the last mainchain torsion (not a DOF).
-                    setting = 180.0
-                    if j!=len(pose.residue(i).mainchain_torsions())-1:
-                        setting = numeric.random.rg().uniform()*360.0 - 180.0
-                    pose.set_torsion( core.id.TorsionID(i, core.id.BB, j), setting );
+                if pose.residue_type(i).is_oligourea(): pose.set_mu(i, 180.0)
         return 0
+    
+#     def randomize_mainchain(self, pose: core.pose.Pose) -> int:
+#         """Randomize the main chain torsions of our pose"""
+#         self.debug: print("---Randomizing mainchain torsions.---")
+#         nres = pose.total_residue()
+#         rama = core.scoring.ScoringManager.get_instance().get_Ramachandran()
+#         ramaprepro = core.scoring.ScoringManager.get_instance().get_RamaPrePro()
+# 
+#         for i in range(1, nres+1):
+#             if pose.residue_type(i).is_alpha_aa() or pose.residue_type(i).is_peptoid():
+#                 rand_torsions = pose.residue(i).mainchain_torsions()
+#                 # Use a fake alanine for following_rsd for the cterm residue unless you're doing
+#                 # cterm cyclization and thus you can use its upper-connected residue.
+#                 if i == nres:
+#                     following_rsd = core.chemical.ResidueTypeFinder(
+#                             core.chemical.ChemicalManager.get_instance().residue_type_set("fa_standard")
+#                             ).residue_base_name("ALA").get_representative_type()
+#                 else:
+#                     following_rsd = pose.residue_type_ptr(
+#                         pose.residue(i).residue_connection_partner( pose.residue(i).upper_connect().index() )
+#                     )
+#                 ramaprepro.random_mainchain_torsions( pose.conformation(), pose.residue_type_ptr(i), following_rsd, rand_torsions )
+#                 covered_torsions = ramaprepro.get_mainchain_torsions_covered( pose.conformation(), pose.residue_type_ptr(i), following_rsd )
+#                 assert len(pose.residue(i).mainchain_torsions()) - 1 == len(rand_torsions) - 1, "This is wrong"
+#                 for j in range(1, len(rand_torsions)):
+#                     if covered_torsions[j] == 0.0:
+#                         # Copy torsion values for torsions that are not covered by the mainchain potential -- i.e. don't set these to 0.
+#                         rand_torsions[j] = pose.residue(i).mainchain_torsions()[j] 
+#                     else: # Using classic rama tables for sampling:
+#                         if pose.residue(i).backbone_aa() != core.chemical.aa_unk:
+#                             rama.random_phipsi_from_rama(pose.residue(i).backbone_aa(), rand_torsions[1], rand_torsions[2])
+#                         else:
+#                             rama.random_phipsi_from_rama( pose.residue_type(i).aa(), rand_torsions[1], rand_torsions[2])
+#                 assert len(rand_torsions) - 1 == len(pose.residue(i).mainchain_torsions()) - 1, "Wrong here"
+#                 for j in range(1, len(rand_torsions)): 
+#                     pose.set_torsion( core.id.TorsionID( i, core.id.BB, j ), rand_torsions[j] )
+#                 if i!=nres: pose.set_omega(i, 180.0)
+#                 if pose.residue_type(i).is_oligourea(): pose.set_mu(i, 180.0);
+#             else: #If this is not a recognized type:
+#                 for j in range(1, len(pose.residue(i).mainchain_torsions())): # Loop through all mainchain torsions.
+#                     if i==nres and j==len(pose.residue(i).mainchain_torsions())-1: continue; # Skip the last mainchain torsion (not a DOF).
+#                     setting = 180.0
+#                     if j!=len(pose.residue(i).mainchain_torsions())-1:
+#                         setting = numeric.random.rg().uniform()*360.0 - 180.0
+#                     pose.set_torsion( core.id.TorsionID(i, core.id.BB, j), setting );
+#         return 0
 
     def anchor_randomizebyrama(self,
                                pose: io.Pose,
@@ -372,7 +406,7 @@ class BackboneGeneration:
 
         return pp
 
-    def apply_genkic(self, pose: io.Pose) -> io.Pose:
+    def apply_genkic(self, pose: io.Pose, lariat_sample_cis_: bool = False) -> io.Pose:
         """
         Apply the generalized kinematic loop closure to a pose. This will designate the appropriate
         size genkic to apply
@@ -380,6 +414,7 @@ class BackboneGeneration:
         PARAMS
         ------
         :pose: Our input glycine pose that has been set up
+        :lariat_sample_cis_: Determines if our CA-N-CO-CP2 bond is cis (true) or trans (false)
 
         RETURNS
         -------
@@ -449,30 +484,17 @@ class BackboneGeneration:
 
         # Add close bond logic
         if self.thioether:
-            GenKIC.close_bond(
-                rsd1 = cyclization_point_start,
-                at1 = pose.residue_type(cyclization_point_start).get_disulfide_atom_name(),
-                rsd2 = cyclization_point_end,
-                at2 = "CP2",
-                bondlength = 1.827,  # taken from protocols/cyclic_peptide/crosslinker/thioether_util.hh
-                bondangle1 = 1.960/(3.14159265358979323846264338327950288*180.0), # taken from numeric/NumericTraits.hh
-                bondangle2 = 1.781/(3.14159265358979323846264338327950288*180.0),
-                torsion = 180.,
-                rsd1_before = 0,
-                at1_before = "",
-                rsd2_after = 0,
-                at2_after = "",
-                randomize_this_torsion = False,
-                randomize_flanking_torsions = False,
-            )
             # Set the omega bond to trans
-#             self.debug: print("---Set Omega bonds to trans---")
-#             GenKIC.add_perturber( protocols.generalized_kinematic_closure.perturber.set_dihedral )
-#             omega_vect = rosetta.utility.vector1_core_id_NamedAtomID()
-#             omega_vect.append( core.id.NamedAtomID( "N", cyclization_point_end) )
-#             omega_vect.append( core.id.NamedAtomID( "CO",cyclization_point_end) )
-#             GenKIC.add_atomset_to_perturber_atomset_list( omega_vect )
-#             GenKIC.add_value_to_perturber_value_list( 180.0 )
+            # This only produces CA-N-CO-CP2 bonds without randomization
+            # trans should be energetically favored, so setting bond to trans here if option specified
+            if not lariat_sample_cis_:
+                self.debug: print("---Set Omega bonds to trans---")
+                GenKIC.add_perturber( protocols.generalized_kinematic_closure.perturber.set_dihedral )
+                omega_vect = rosetta.utility.vector1_core_id_NamedAtomID()
+                omega_vect.append( core.id.NamedAtomID( "N", cyclization_point_end) )
+                omega_vect.append( core.id.NamedAtomID( "CO",cyclization_point_end) )
+                GenKIC.add_atomset_to_perturber_atomset_list( omega_vect )
+                GenKIC.add_value_to_perturber_value_list( 180.0 )
 
             # Setup atomsets of thieother to perturb
             self.debug: print("---Setup Atomset of thioether to perturb---")
@@ -509,6 +531,23 @@ class BackboneGeneration:
                 bb_vect.append( core.id.NamedAtomID( "C", cyclization_point_end ) )
                 GenKIC.add_atomset_to_perturber_atomset_list( bb_vect )
 
+            # Setup our close bond logic
+            GenKIC.close_bond(
+                rsd1 = cyclization_point_start,
+                at1 = pose.residue_type(cyclization_point_start).get_disulfide_atom_name(),
+                rsd2 = cyclization_point_end,
+                at2 = "CP2",
+                bondlength = 1.827,  # taken from protocols/cyclic_peptide/crosslinker/thioether_util.hh
+                bondangle1 = 1.960/(3.14159265358979323846264338327950288*180.0), # taken from numeric/NumericTraits.hh
+                bondangle2 = 1.781/(3.14159265358979323846264338327950288*180.0),
+                torsion = 180.,
+                rsd1_before = 0,
+                at1_before = "",
+                rsd2_after = 0,
+                at2_after = "",
+                randomize_this_torsion = False,
+                randomize_flanking_torsions = False,
+            )
         else:
             GenKIC.close_bond(
                 rsd1 = pose.total_residue(),
@@ -550,10 +589,10 @@ class BackboneGeneration:
         GenKIC.add_filter(genkic.filter.filter_type.loop_bump_check)
 
         # Set rama check filters
-        for i in range(1, pose.total_residue()):
+        for i in range(1, pose.total_residue()+1):
             if i != pivot_res[0] and i != pivot_res[1] and i != pivot_res[2]: continue
-            if self.thioether:
-                if i == cyclization_point_end or i == cyclization_point_start: continue
+#             if self.thioether:
+#                 if i == cyclization_point_end or i == cyclization_point_start: continue
             GenKIC.add_filter(genkic.filter.filter_type.rama_prepro_check)
             GenKIC.set_filter_resnum(i)
             GenKIC.set_filter_rama_cutoff_energy(2)
@@ -983,7 +1022,6 @@ class BackboneGeneration:
             # Declare our terminal bond
             self.declare_terminal_bond(pose)
 
-        self.randomize_mainchain(pose)
 
         # Setup SilentFile Output
         opts = silent.SilentFileOptions()
@@ -1006,8 +1044,9 @@ class BackboneGeneration:
         # for n in range(nstruct):
             # We clone our pose here, so that the bb torsion randomization is stochastic
             genkic_pose = pose.clone()
+            self.randomize_mainchain(genkic_pose, not self.thioether)
             # Apply Genkic to pose and clone it
-            genkic_succ = self.apply_genkic(genkic_pose)
+            genkic_succ = self.apply_genkic(genkic_pose, True)
 #             print("Genkic success:", genkic_succ, "Number of Success:", success)
             if not genkic_succ:
                 continue
