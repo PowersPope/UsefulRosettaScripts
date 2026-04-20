@@ -5,7 +5,7 @@
 
 # import Packages
 import os
-import glob
+from typing import TextIO
 import utils.helper as helpfunc
 import utils.filters as filterfuncs
 import argparse
@@ -19,11 +19,23 @@ import pyrosetta.io as io
 from pyrosetta.rosetta.core.scoring import ScoreFunction
 
 
-def silentfile_process(args, 
+def silentfile_process(args,
                        insf: silent.SilentFileData,
-                       ) -> list[int]:
+                       outfile: TextIO,
+                       ) -> int:
     """Cluster the structures in our SilentFile, to see how many unique clusters
     are present in our ensemble.
+
+    Logic:
+        1. Grab i, j poses
+        2. i is a cluster center
+        3. now we loop through our list of structs (j)
+            a. Check RMSD of i and j
+                if <= rmsd_cutoff:
+                    1. remove from list
+                    2. Add to cluster center list of values
+                else:
+                    1. continue
     
     PARAMS
     ------
@@ -32,7 +44,6 @@ def silentfile_process(args,
     """
     structure_list = list(insf.structure_list())
     decoy_names = list(insf.tags())
-    cluster_map = dict()
 
     # take a pose (i) and (j) 
     pose_i = core.pose.Pose()
@@ -40,11 +51,9 @@ def silentfile_process(args,
 
     # Track variables
     cluster_count = 0
-    entry_left = True
-    while entry_left:
-        scaffolds_accumulated = list()  
-        scaffold_names = list()
-        scaffold_count = -1
+
+    # Loop to cluster everything
+    while len(structure_list) != 0:
         pose_i.clear()
 
         # Fill our pose
@@ -56,13 +65,12 @@ def silentfile_process(args,
 
         cluster_count += 1
         if args.output_cluster_centers:
-            pose_i.dump_pdb(f"{name}-clustercenter-{cluster_count}.pdb")
+            pose_i.dump_pdb(os.path.join(args.output_path, f"{name}-clustercenter-{cluster_count}.pdb"))
 
-        rmsd_count = np.zeros(1, dtype=np.float32)
-        # Iter through our other availabel structures
-        while structure_list:
-            silentstruct_j = structure_list.pop(0)
-            j_name = decoy_names.pop(0)
+        rmsd_count = np.zeros(1, dtype=np.int32)
+        for j in range(len(structure_list) - 1, -1, -1):
+            silentstruct_j = structure_list[j]
+            j_name = decoy_names[j]
             silentstruct_j.fill_pose(pose_j)
 
             # Grab the Atom Map to compute RMSD
@@ -80,21 +88,15 @@ def silentfile_process(args,
                     pose_i,
                     bb_heavy_atommap,
                     )
-            if rmsd_value > args.rmsd_cutoff:
-                scaffolds_accumulated.append(silentstruct_j)
-                scaffold_names.append(j_name)
-            else:
+            if rmsd_value <= args.rmsd_cutoff:
                 rmsd_count += 1
+                structure_list.pop(j)
+                decoy_names.pop(j)
             pose_j.clear()
 
-        cluster_map[cluster_count] = rmsd_count
-        structure_list = scaffolds_accumulated
-        decoy_names = scaffold_names
+        print(f"{cluster_count},{rmsd_count},{score},{len(structure_list)}", file=outfile)
 
-    print(f"RMSD Dict of Matches <= {args.rmsd_cutoff}:")
-    print(cluster_map)
-    print("Number of Unique Clusters:", len(cluster_map.keys()))
-
+    outfile.close()
     return 0
 
 
@@ -106,7 +108,12 @@ if __name__ == "__main__":
     p.add_argument("--order-by-energy", "-obe", action="store_true", help="If you scored your structural ensemble, then use this flag to do energy based clustering. \
             This will segfault if you did not score the outputs!")
     p.add_argument("--output-cluster-centers", action="store_true", help="Output the cluster centers in pdbs, so that you can visualize the peptides.")
+    p.add_argument("--output-path", default="./", type=str, help="Write .pdb and .txt files to this location. Will create the folders if it doesnt exist.")
     args = p.parse_args()
+
+    # Create our out path if it doesnt exist
+    if not os.path.exists(args.output_path):
+        os.makedirs(args.output_path)
 
     # Setup our initial Rosetta instance with our presets
     init(extra_options="-mute all -in:file:fullatom true")
@@ -118,8 +125,10 @@ if __name__ == "__main__":
     sf_data.read_file(args.insilent)
     if args.order_by_energy: 
         sf_data.order_by_energy()
-#         sf_data.renumber_all_decoys()
 
     # filter the outputs in our silentfile
-    silentfile_process(args, sf_data)
+    cluster_out = open(os.path.join(args.output_path, "cluster_count.txt"), "w")
+    print(f"Clustered with order by energy: {args.order_by_energy}, and a RMSD cutoff of: {args.rmsd_cutoff}", file=cluster_out)
+    print(f"Cluster,Count,Score,NumOfStructuresLeft", file=cluster_out)
+    silentfile_process(args, sf_data, cluster_out)
 
