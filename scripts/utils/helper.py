@@ -2374,6 +2374,124 @@ def interface_cyclicpeptide_design(
             print("--- Too High. Redoing ---")
     return copy_iter_pose.clone()
 
+##### Thioether helper functions
+def find_first_and_last_polymer_residues(pose:core.pose.Pose) -> tuple[int, int]:
+    """Fine the first and last polymer residues in a pose
+
+    RETURNS
+    -------
+    :first_polymer_res: First Polymer in pose
+    :last_polymer_res: Last Polymer in pose
+    """
+    first_polymer_res, last_polymer_res = 0, 0
+    for ir in range(1, pose.total_residue()+1):
+        if pose.residue_type(ir).is_polymer():
+            last_polymer_res = ir
+            if first_polymer_res == 0: 
+                first_polymer_res = ir
+
+    return first_polymer_res, last_polymer_res
+
+def find_first_and_last_thioether_lariat_residues(pose: core.pose.Pose, lariat_sidechain_index: int=0) -> tuple[int,int]:
+    """Given a pose, find the first and last thioether lariat bond-forming residues.
+
+    @details First residue is 1 by definition (chloroacetyl goes where??); last is
+    TYPICALLY C-term in the classic peptidream approach but does not have to be.
+    n.b. Suga has methods for incorporating additional cysteines into bicyclic
+    peptides, but for the moment "closest to the opposite terminus" is sufficient.
+    """
+    firstres = 1
+    if lariat_sidechain_index != 0:
+        lastres = lariat_sidechain_index
+    else:
+        lastres = find_last_disulf_res(pose)
+
+    return firstres, lastres
+
+def set_up_terminal_thioether_lariat_variants(pose: core.pose.Pose, lariat_sidechain_index: int=0) -> int:
+    """Given a pose, add sidechain conjugation variant tytpes to the C-terminal
+    cysteine and add a special acetyl terminus to the N-terminal residue
+
+    RETURNS
+    -------
+    :cys_index: The thioether cyteien index
+    """
+    firstres, lastres = find_first_and_last_thioether_lariat_residues(pose, lariat_sidechain_index)
+
+    first_polymer, last_polymer = find_first_and_last_polymer_residues(pose)
+
+    core.pose.add_upper_terminus_type_to_pose_residue(pose, last_polymer)
+    protocols.cyclic_peptide.crosslinker.set_up_thioether_variants(pose, firstres, lastres)
+
+    return lastres
+
+def find_last_disulf_res(pose: core.pose.Pose) -> int:
+    """Return the index of the last resiude that can form a disulfide
+
+    PARAMS
+    ------
+    :pose: Our pose with the generated appropriate sequence
+
+    RETURNS
+    -------
+    The index of our last residue that can form a disulfide
+    """
+    for i in range(pose.total_residue(), 0, -1):
+        if pose.residue_type(i).is_sidechain_thiol() or pose.residue_type(i).is_disulfide_bonded():
+            return i
+
+def declare_thioether_bond_mover(
+        pose: core.pose, 
+        termini_close: protocols.simple_moves.DeclareBond,
+        lariat_sidechain_index: int = 0,
+        ) -> protocols.simple_moves.DeclareBond:
+    """Take in a pose with a DeclareBond Mover and set them up, so that they
+    would correctly close and declare a thioether bond closure for our
+    peptide.
+
+    PARAMS
+    ------
+    :pose: Peptide Pose only
+    :termini_close: Our init DeclareBond Mover, no settings are set yet
+    :lariat_sidechain_index: If specified the location where the lariat sidechain is located,
+        if not then 0 is used and a search is done.
+    """
+
+    firstres, lastres = find_first_and_last_thioether_lariat_residues(pose, lariat_sidechain_index)
+
+    # Get the name of the first sidechain connection atom:
+    restype = pose.residue_type( firstres )
+    ntermres_sc_connection_id = restype.n_possible_residue_connections()
+    ntermres_sc_connection_atom_index = restype.residue_connect_atom_index( ntermres_sc_connection_id )
+    ntermres_sc_connection_atom = restype.atom_name( ntermres_sc_connection_atom_index )
+
+    # Get the name of the second sidechain connection atom:
+    restype2 = pose.residue_type( lastres )
+    sidechainres_sc_connection_id = restype2.n_possible_residue_connections()
+    sidechainres_sc_connection_atom_index = restype2.residue_connect_atom_index( sidechainres_sc_connection_id )
+    sidechainres_sc_connection_atom = restype2.atom_name( sidechainres_sc_connection_atom_index )
+
+#     if debug: print("Setting up thioether lariat covalent bond from " + restype.base_name() + str(firstres) + ", atom " + ntermres_sc_connection_atom + " to residue " + restype2.base_name() + str(lastres) + ", atom " + sidechainres_sc_connection_atom + "." )
+
+#         termini_close.set( sidechainres, sidechainres_sc_connection_atom, ntermres, ntermres_sc_connection_atom, false );
+    termini_close.set( lastres, sidechainres_sc_connection_atom, firstres, ntermres_sc_connection_atom, False );
+    return termini_close.clone()
+
+
+def declare_thioether_constraints(pose: core.pose.Pose) -> None:
+    """Given a pose, find the first and last thioether lariat bond-forming residues.
+    First residue is 1 by definition (chloroacetyl goes where??); last is
+    TYPICALLY C-term in the classic peptidream approach but does not have to be.
+    n.b. Suga has methods for incorporating additional cysteines into bicyclic
+    peptides, but for the moment "closest to the opposite terminus" is sufficient.
+    """
+    n_index, c_index = find_first_and_last_thioether_lariat_residues(pose)
+    protocols.cyclic_peptide.crosslinker.set_up_thioether_constraints(
+        pose,
+        n_index,
+        c_index,
+    )
+
 
 # -----
 # DEBUG INFO FUNCTIONS
