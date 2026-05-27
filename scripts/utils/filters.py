@@ -481,3 +481,60 @@ def interface_analyzer(
     interfaceAnalyzer.apply(currpose)
     interfaceAnalyzer.add_score_info_to_pose(currpose)
     return 0
+
+def count_intermol_hbonds_of_specificresidues(
+        pose: core.pose.Pose,
+        non_motif: list[int],
+        ) -> int:
+    """Count the number of intermolecular hbonds of our specific section
+    this will be used as a way to determine if our residue section are
+    being designed to have a good amount of interactions or not.
+
+    PARAMS
+    ------
+    :pose: Our designed complex pose
+    :non_motif: The non-motif residues selected that we want to perform our checkon.
+
+    RETURNS
+    -------
+    :num_interacts: The total number of hbonds to our non_motif residues
+    :hbond_counts: a dict of hbonds to breakdown what type of interactions are happening.
+    """
+    # Setup our HBondSet and fill with relevent information from
+    # our pose
+    hbset = core.scoring.hbonds.HBondSet()
+    core.scoring.hbonds.fill_hbond_set(pose, False, hbset)
+
+    # Set up our type of interaction map
+    hbond_counts = {"bb-bb": 0, "sc-sc": 0, "bb-sc": 0}
+
+    # Loop over all hbonds within our filled HBondSet Object
+    for i in range(1, hbset.nhbonds()+1):
+        hb = hbset.hbond(i)
+        donor_res = hb.don_res()
+        acceptor_res = hb.acc_res()
+
+        # Skip this residue, as we dont care about it
+        if (acceptor_res not in non_motif) and (donor_res not in non_motif): continue
+
+        # Only select hbonds that are across the interface (i.e. different chains)
+        if pose.residue(donor_res).chain() != pose.residue(acceptor_res).chain():
+            assert pose.residue(donor_res).atom_is_polar_hydrogen(hb.don_hatm()), "The donor atom is not polar. The way HBondSet was filled might be wrong."
+            # Determine if the donor or acceptor atom is a part of the backbone
+            donor_bb = pose.residue(donor_res).atom_is_backbone(hb.don_hatm())
+            acceptor_bb = pose.residue(acceptor_res).atom_is_backbone(hb.acc_atm())
+
+            if debug: print("Donor Res:", donor_res, "Acceptor Res:", acceptor_res)
+
+            # Map our type of hbond
+            if donor_bb and acceptor_bb:
+                hbond_counts["bb-bb"] += 1
+            elif not donor_bb and not acceptor_bb:
+                hbond_counts["sc-sc"] += 1
+            else:
+                hbond_counts["bb-sc"] += 1
+
+    # Sum the total number of hbonds across the interface
+    num_interacts = sum(hbond_counts.values())
+    return num_interacts, hbond_counts
+
